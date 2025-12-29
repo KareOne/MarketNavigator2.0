@@ -1,0 +1,70 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Local data
+*.sqlite3
+*.db
+
+# Docker volumes (but keep config)
+redis_data/
+minio_data/
+backend_media/
+backend_static/
+
+# Build artifacts
+.next/
+out/
+*.pyc
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# SSL certificates (generated on server)
+nginx/ssl/*.pem
+
+# NOTE: .env files ARE tracked for this project (production deployment)
+# Remove these lines if you want to exclude them:
+# .env
+# .env.*
