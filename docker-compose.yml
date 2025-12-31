@@ -1,6 +1,5 @@
-# MarketNavigator v2 - High-Scale Production Docker Compose
+# MarketNavigator v2 - Local Development Docker Compose
 # Includes Crunchbase and Tracxn scrapers
-# Per HIGH_SCALE_ARCHITECTURE_PLAN.md
 
 services:
   # ==========================================================================
@@ -53,7 +52,6 @@ services:
 
   # ==========================================================================
   # Scraper APIs (Crunchbase + Tracxn)
-  # NOTE: These use REMOTE MySQL databases on Liara (configured in their .env files)
   # ==========================================================================
 
   crunchbase_api:
@@ -67,25 +65,21 @@ services:
     environment:
       PYTHONWARNINGS: "ignore::FutureWarning"
       PANDAS_FUTURE_NO_SILENT_DOWNCASTING: "True"
-      # Note: Credentials are loaded from scrapers/Crunchbase_API/.env file
-      # which contains remote Liara MySQL connection
     restart: unless-stopped
 
-  # tracxn_api:
-  #   build: ./scrapers/Tracxn_API
-  #   container_name: mn2-tracxn-api
-  #   command: sh -c "xvfb-run -a python api.py"
-  #   volumes:
-  #     - ./scrapers/Tracxn_API:/app
-  #   ports:
-  #     - "8008:8008"
-  #   environment:
-  #     PYTHONWARNINGS: "ignore::FutureWarning"
-  #     PANDAS_FUTURE_NO_SILENT_DOWNCASTING: "True"
-  #     HEADLESS_MODE: "true"
-  #     # Note: Database credentials are in scrapers/Tracxn_API/config.py
-  #     # which connects to remote Liara MySQL
-  #   restart: unless-stopped
+  tracxn_api:
+    build: ./scrapers/Tracxn_API
+    container_name: mn2-tracxn-api
+    command: sh -c "xvfb-run -a python api.py"
+    volumes:
+      - ./scrapers/Tracxn_API:/app
+    ports:
+      - "8008:8008"
+    environment:
+      PYTHONWARNINGS: "ignore::FutureWarning"
+      PANDAS_FUTURE_NO_SILENT_DOWNCASTING: "True"
+      HEADLESS_MODE: "true"
+    restart: unless-stopped
 
   # ==========================================================================
   # Django Backend
@@ -245,13 +239,16 @@ services:
     restart: unless-stopped
 
   # ==========================================================================
-  # Next.js Frontend
+  # Next.js Frontend (Local Development)
   # ==========================================================================
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=http://localhost:8000
+        - NEXT_PUBLIC_WS_URL=ws://localhost:8000
     container_name: mn2-frontend
     volumes:
       - ./frontend/src:/app/src
