@@ -71,21 +71,21 @@ services:
       # which contains remote Liara MySQL connection
     restart: unless-stopped
 
-  tracxn_api:
-    build: ./scrapers/Tracxn_API
-    container_name: mn2-tracxn-api
-    command: sh -c "xvfb-run -a python api.py"
-    volumes:
-      - ./scrapers/Tracxn_API:/app
-    ports:
-      - "8008:8008"
-    environment:
-      PYTHONWARNINGS: "ignore::FutureWarning"
-      PANDAS_FUTURE_NO_SILENT_DOWNCASTING: "True"
-      HEADLESS_MODE: "true"
-      # Note: Database credentials are in scrapers/Tracxn_API/config.py
-      # which connects to remote Liara MySQL
-    restart: unless-stopped
+  # tracxn_api:
+  #   build: ./scrapers/Tracxn_API
+  #   container_name: mn2-tracxn-api
+  #   command: sh -c "xvfb-run -a python api.py"
+  #   volumes:
+  #     - ./scrapers/Tracxn_API:/app
+  #   ports:
+  #     - "8008:8008"
+  #   environment:
+  #     PYTHONWARNINGS: "ignore::FutureWarning"
+  #     PANDAS_FUTURE_NO_SILENT_DOWNCASTING: "True"
+  #     HEADLESS_MODE: "true"
+  #     # Note: Database credentials are in scrapers/Tracxn_API/config.py
+  #     # which connects to remote Liara MySQL
+  #   restart: unless-stopped
 
   # ==========================================================================
   # Django Backend
