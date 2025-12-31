@@ -67,30 +67,48 @@ GENERATE_CRUNCHBASE_PARAMS_TOOL = {
     "type": "function",
     "function": {
         "name": "generate_crunchbase_params",
-        "description": """Generate optimized keywords and target description for Crunchbase company similarity search.
-Based on the startup's information, generate:
-1. 8-12 diverse keywords covering: core technology, industry vertical, business model, target market
-2. A 2-3 sentence target description optimized for semantic similarity matching
+        "description": """Generate strategic Crunchbase search parameters for competitive research.
 
-KEYWORD FORMAT RULES:
-- Use SPACE-SEPARATED compound words (never camelCase or joined words)
-- Include both broad category terms and specific niche terms
-- Cover multiple aspects: technology, industry, business model, target audience
+KEYWORD GENERATION RULES:
+
+1. NEVER extract words directly from the startup description
+   - BAD: "strategic", "research", "platform", "designed", "support"
+   - These are generic descriptor words, NOT searchable industry terms
+
+2. Generate INDUSTRY-SPECIFIC and MARKET-SPECIFIC terms:
+   - Good: "Business Intelligence", "Market Research SaaS", "Startup Analytics"
+   - Good: "Competitive Intelligence Platform", "Data Analytics Startup"
+   - Good: "B2B Analytics", "Market Analysis Tools", "Investor Insights"
+
+3. Include a MIX of:
+   - Industry verticals (e.g., "FinTech", "EdTech", "HealthTech")
+   - Technology categories (e.g., "AI Analytics", "Machine Learning Platform")
+   - Business model terms (e.g., "SaaS Platform", "B2B Marketplace")
+   - Use case keywords (e.g., "Pitch Deck", "Startup Validation", "Market Research")
+
+4. Format rules:
+   - 2-3 word phrases are ideal (e.g., "Market Intelligence", "Startup Tools")
+   - Use proper capitalization (e.g., "AI Analytics" not "ai analytics")
+   - No single generic words like "platform", "data", "analytics" alone
 
 EXAMPLES:
-- AI storytelling startup → ['AI Storytelling', 'Generative AI', 'Digital Storytelling', 'Creative AI', 'Narrative Tech', 'AI Content Creation', 'Story Generator', 'Entertainment AI']
-- Pet services platform → ['Pet Care', 'Pet Products', 'AI for Pets', 'Pet Health', 'Pet Subscription', 'Animal Wellness', 'Pet Training', 'Smart Pet Care']""",
+- 'AI storytelling startup' → ['AI Storytelling', 'Generative AI', 'Digital Storytelling', 'Creative AI', 'Narrative Tech', 'AI Content Creation', 'Story Generator', 'Entertainment AI']
+- 'pet services platform' → ['Pet Care', 'Pet Products', 'AI for Pets', 'Pet Health', 'Pet Subscription', 'Animal Wellness', 'Smart Pet Care']
+- 'avatar video support' → ['AI Video', 'Avatar Video', 'Customer Support AI', 'Help Center Video', 'Knowledge Base', 'CX Automation', 'Video FAQ', 'Support Automation']
+
+Also generate a 2-3 sentence target description optimized for semantic similarity matching.""",
         "parameters": {
             "type": "object",
             "properties": {
                 "keywords": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "8-12 diverse search keywords for finding similar companies"
+                    "description": "8-12 industry/market search terms. Multi-word phrases like 'Market Intelligence', 'Startup Analytics'. NEVER single generic words.",
+                    "minItems": 8
                 },
                 "target_description": {
                     "type": "string",
-                    "description": "2-3 sentence description optimized for semantic similarity search"
+                    "description": "2-3 sentence description focusing on the core technology, target market, and unique value proposition for semantic similarity matching"
                 }
             },
             "required": ["keywords", "target_description"],
@@ -98,6 +116,7 @@ EXAMPLES:
         }
     }
 }
+
 
 # All available tools for the chat AI
 AI_TOOLS = [FILL_PROJECT_INPUTS_TOOL]
@@ -266,7 +285,9 @@ async def generate_crunchbase_params_from_inputs(inputs) -> dict:
     client = AsyncOpenAI(api_key=api_key)
     
     # Build context from project inputs
-    context = f"""Startup Information:
+    context = f"""Analyze this startup and generate INDUSTRY-SPECIFIC search keywords for Crunchbase competitive research.
+
+STARTUP INFORMATION:
 - Name: {inputs.startup_name or 'Not specified'}
 - Description: {inputs.startup_description or 'Not specified'}
 - Target Audience: {inputs.target_audience or 'Not specified'}
@@ -276,13 +297,28 @@ async def generate_crunchbase_params_from_inputs(inputs) -> dict:
 - Research Goal: {inputs.research_goal or 'Not specified'}
 - Competitors/Inspiration: {inputs.inspiration_sources or 'Not specified'}
 
-Based on this startup information, generate optimized search parameters for finding similar companies on Crunchbase."""
+YOUR TASK:
+Generate 8-12 industry/market search terms to find SIMILAR COMPANIES on Crunchbase.
+
+CRITICAL: Do NOT extract generic words from the description like "strategic", "platform", "designed", "support", etc.
+Instead, generate meaningful industry categories and market terms like "Market Intelligence", "Business Analytics", "Startup Tools", etc."""
+
+    system_prompt = """You are an expert startup analyst specializing in competitive research and market intelligence.
+
+Your job is to analyze a startup concept and generate strategic SEARCH KEYWORDS that would find similar, competing, or complementary companies on Crunchbase.
+
+IMPORTANT RULES:
+1. Generate INDUSTRY TERMS and MARKET CATEGORIES, not generic descriptor words
+2. Think about: What industry is this in? What technology does it use? Who are the buyers? What problem does it solve?
+3. Include a mix of: industry verticals (FinTech, EdTech), technology terms (AI Analytics), business models (SaaS, B2B), and use cases (Market Research, Pitch Decks)
+4. Each keyword should be 2-3 words, properly capitalized
+5. NEVER use single generic words like "platform", "strategic", "designed", "support", etc."""
 
     try:
         response = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are an expert at analyzing startups and generating search keywords for competitive research."},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": context}
             ],
             tools=CRUNCHBASE_TOOLS,

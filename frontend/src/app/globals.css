@@ -1141,3 +1141,175 @@ select:focus {
     display: none;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   REPORT CONTENT STYLES - For rendered HTML content in report pages
+═══════════════════════════════════════════════════════════════════════════ */
+
+.report-content {
+  color: var(--color-text);
+  line-height: 1.7;
+}
+
+.report-content h1,
+.report-content h2,
+.report-content h3,
+.report-content h4 {
+  color: var(--color-heading);
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+}
+
+.report-content h3 {
+  font-size: 16px;
+  margin-top: 1.2em;
+}
+
+.report-content h4 {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+}
+
+.report-content p {
+  margin: 0.8em 0;
+}
+
+.report-content ul,
+.report-content ol {
+  margin: 0.8em 0;
+  padding-left: 1.5em;
+}
+
+.report-content li {
+  margin: 0.4em 0;
+}
+
+.report-content strong {
+  color: var(--color-heading);
+  font-weight: 600;
+}
+
+.report-content em {
+  color: var(--color-text-secondary);
+}
+
+.report-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 13px;
+}
+
+.report-content th,
+.report-content td {
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  text-align: left;
+}
+
+.report-content th {
+  background: var(--color-surface-muted);
+  font-weight: 600;
+  color: var(--color-heading);
+}
+
+.report-content tr:hover {
+  background: var(--color-surface-hover);
+}
+
+.report-content blockquote {
+  margin: 1em 0;
+  padding: 12px 16px;
+  border-left: 3px solid var(--color-primary);
+  background: var(--color-surface-muted);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--color-text-secondary);
+}
+
+.report-content code {
+  background: var(--color-surface-muted);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  font-family: 'Monaco', 'Menlo', monospace;
+}
+
+.report-content pre {
+  background: var(--color-surface-muted);
+  padding: 16px;
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  margin: 1em 0;
+}
+
+.report-content a {
+  color: var(--color-secondary);
+  text-decoration: underline;
+}
+
+.report-content a:hover {
+  color: var(--color-primary);
+}
+
+.report-content hr {
+  border: none;
+  border-top: 1px solid var(--color-border);
+  margin: 1.5em 0;
+}
+
+/* Company cards in reports */
+.report-content .company-card,
+.report-content .card {
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  margin: 12px 0;
+}
+
+.report-content .company-name,
+.report-content .card-title {
+  font-weight: 600;
+  color: var(--color-heading);
+  margin-bottom: 8px;
+}
+
+/* SWOT Analysis grid */
+.report-content .swot-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  margin: 16px 0;
+}
+
+.report-content .swot-item {
+  padding: 16px;
+  border-radius: var(--radius-md);
+}
+
+.report-content .swot-strengths {
+  background: rgba(52, 211, 153, 0.1);
+  border: 1px solid rgba(52, 211, 153, 0.3);
+}
+
+.report-content .swot-weaknesses {
+  background: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+}
+
+.report-content .swot-opportunities {
+  background: rgba(96, 165, 250, 0.1);
+  border: 1px solid rgba(96, 165, 250, 0.3);
+}
+
+.report-content .swot-threats {
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+}
+
+@media (max-width: 768px) {
+  .report-content .swot-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,8 +1,8 @@
 """
-Keyword Generator Service using Liara AI.
+Keyword Generator Service using Liara AI with Function Calling.
 
-Generates search keywords and target descriptions for Crunchbase reports
-based on project inputs. Uses Liara's Gemini 2.5 Flash model.
+Forces AI to use the generate_keywords tool - NO FALLBACK.
+Uses Liara's Gemini 2.5 Flash model with tool_choice="required".
 """
 
 import os
@@ -20,52 +20,68 @@ LIARA_BASE_URL = os.getenv("LIARA_BASE_URL", "https://ai.liara.ir/api/6918348a83
 LIARA_MODEL = os.getenv("LIARA_MODEL", "google/gemini-2.5-flash")
 
 
-KEYWORD_GENERATION_PROMPT = """You are a market research expert specializing in startup and company analysis. Your task is to analyze the project inputs and generate optimal search parameters for finding similar companies in Crunchbase.
+# System prompt for the keyword generation AI
+KEYWORD_AI_SYSTEM_PROMPT = """You are a specialized Keyword Generation AI for Crunchbase competitive research.
 
-## PROJECT INPUTS:
-Startup Name: {startup_name}
-Description: {startup_description}
-Target Audience: {target_audience}
-Business Model: {business_model}
-Current Stage: {current_stage}
-Geographic Focus: {geographic_focus}
-Research Goal: {research_goal}
-Competitors/Inspiration: {inspiration_sources}
+YOUR ONLY JOB: Analyze startup information and generate industry-specific search keywords using the generate_keywords tool.
 
-## YOUR TASK:
+## CRITICAL RULES:
 
-Generate two things:
+1. YOU MUST ALWAYS call the generate_keywords tool - no exceptions
+2. NEVER extract single words from the description like "strategic", "platform", "designed"
+3. Generate 2-3 word INDUSTRY TERMS like "Market Intelligence", "Business Analytics"
+4. Think about: What industry? What technology? Who are the customers? What problem is solved?
 
-### 1. SEARCH KEYWORDS (8-12 keywords)
-Create a diverse set of search keywords that will help find similar companies:
-- **Technology terms**: Core technologies, platforms, tools used
-- **Industry/Sector**: Market categories, verticals, segments
-- **Business model**: Revenue model, customer type (B2B, B2C, SaaS)
-- **Problem/Solution**: Key problems solved, value propositions
-- **Target market**: Demographics, geography, use cases
+## KEYWORD CATEGORIES TO INCLUDE:
+- Industry verticals: "FinTech", "MarTech", "EdTech", "HealthTech"
+- Technology terms: "AI Analytics", "Machine Learning Platform", "Data Intelligence"
+- Business models: "B2B SaaS", "Enterprise Software", "Marketplace Platform"
+- Use cases: "Market Research", "Competitive Intelligence", "Investor Tools"
+- Market segments: "Startup Tools", "SMB Software", "Enterprise Solutions"
 
-Mix broad terms (high coverage) with specific terms (high precision).
-Prioritize terms that would appear in company descriptions on Crunchbase.
+## EXAMPLES:
 
-### 2. TARGET DESCRIPTION (2-3 sentences)
-Write a concise description optimized for semantic similarity search:
-- Capture the core value proposition
-- Include key differentiators
-- Mention target market and use case
-- Use language similar to how companies describe themselves
+Input: "Strategic research platform for startups with analytics"
+Good output: ["Market Intelligence", "Competitive Analysis", "Startup Research", "Business Analytics SaaS", "B2B Data Platform", "Investor Tools", "Market Research Software", "Business Strategy Platform"]
 
-## OUTPUT FORMAT:
-Respond with ONLY valid JSON (no markdown, no code blocks):
-{
-  "keywords": ["keyword1", "keyword2", "keyword3", ...],
-  "target_description": "A 2-3 sentence description..."
-}"""
+Input: "AI-powered pet care subscription service"
+Good output: ["Pet Tech", "Pet Care Platform", "AI Pet Health", "Pet Subscription", "Animal Wellness", "D2C Pet Products", "Smart Pet Care", "Pet E-commerce"]
+
+ALWAYS use the generate_keywords tool with your output."""
+
+
+# Tool definition for keyword generation
+KEYWORD_GENERATION_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "generate_keywords",
+        "description": "Generate industry-specific search keywords for Crunchbase competitive research. Each keyword should be 2-3 words representing an industry category, technology term, or market segment.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "keywords": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "8-12 industry-specific multi-word search terms. Examples: 'Market Intelligence', 'B2B SaaS', 'Competitive Analysis'. NEVER single generic words.",
+                    "minItems": 8,
+                    "maxItems": 12
+                },
+                "target_description": {
+                    "type": "string",
+                    "description": "2-3 sentence description of the startup focusing on industry, technology, and target market for semantic similarity matching."
+                }
+            },
+            "required": ["keywords", "target_description"],
+            "additionalProperties": False
+        }
+    }
+}
 
 
 class KeywordGenerator:
     """
-    Service for generating search keywords and target descriptions
-    using Liara AI (Gemini 2.5 Flash).
+    Service for generating search keywords using Liara AI with forced tool calling.
+    NO FALLBACK - AI must always use the tool.
     """
     
     def __init__(self, api_key: Optional[str] = None):
@@ -86,140 +102,82 @@ class KeywordGenerator:
     
     def generate(self, project_inputs: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Generate keywords and target description from project inputs.
+        Generate keywords using AI with forced tool calling.
         
         Args:
             project_inputs: Dict containing project input fields
             
         Returns:
             Dict with 'keywords' (list) and 'target_description' (str)
+            
+        Raises:
+            Exception: If AI fails to generate keywords (NO FALLBACK)
         """
+        # Build user message with project inputs
+        user_message = f"""Analyze this startup and generate search keywords using the generate_keywords tool:
+
+STARTUP INFORMATION:
+- Name: {project_inputs.get('startup_name', 'N/A')}
+- Description: {project_inputs.get('startup_description', 'N/A')}
+- Target Audience: {project_inputs.get('target_audience', 'N/A')}
+- Business Model: {project_inputs.get('business_model', 'N/A')}
+- Current Stage: {project_inputs.get('current_stage', 'N/A')}
+- Geographic Focus: {project_inputs.get('geographic_focus', 'N/A')}
+- Research Goal: {project_inputs.get('research_goal', 'N/A')}
+- Competitors/Inspiration: {project_inputs.get('inspiration_sources', 'N/A')}
+
+Use the generate_keywords tool to output 8-12 industry-specific search terms."""
+
+        logger.info("🔑 Calling Liara AI with forced tool calling for keyword generation...")
+        
+        # Call Liara API with tool_choice to force tool usage
+        response = self.client.chat.completions.create(
+            model=LIARA_MODEL,
+            messages=[
+                {"role": "system", "content": KEYWORD_AI_SYSTEM_PROMPT},
+                {"role": "user", "content": user_message}
+            ],
+            tools=[KEYWORD_GENERATION_TOOL],
+            tool_choice={"type": "function", "function": {"name": "generate_keywords"}},
+            temperature=0.7,
+            max_tokens=1000
+        )
+        
+        # Extract tool call from response
+        if not response.choices or not response.choices[0].message.tool_calls:
+            raise Exception("AI did not call the generate_keywords tool - this should not happen with tool_choice=required")
+        
+        tool_call = response.choices[0].message.tool_calls[0]
+        
+        if tool_call.function.name != "generate_keywords":
+            raise Exception(f"AI called wrong tool: {tool_call.function.name}")
+        
+        # Parse the tool arguments
         try:
-            # Format the prompt with project inputs
-            prompt = KEYWORD_GENERATION_PROMPT.format(
-                startup_name=project_inputs.get('startup_name', 'N/A'),
-                startup_description=project_inputs.get('startup_description', 'N/A'),
-                target_audience=project_inputs.get('target_audience', 'N/A'),
-                business_model=project_inputs.get('business_model', 'N/A'),
-                current_stage=project_inputs.get('current_stage', 'N/A'),
-                geographic_focus=project_inputs.get('geographic_focus', 'N/A'),
-                research_goal=project_inputs.get('research_goal', 'N/A'),
-                inspiration_sources=project_inputs.get('inspiration_sources', 'N/A')
-            )
-            
-            logger.info("Calling Liara AI to generate search keywords...")
-            
-            # Call Liara API
-            response = self.client.chat.completions.create(
-                model=LIARA_MODEL,
-                messages=[
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7,
-                max_tokens=1000
-            )
-            
-            if not response.choices or not response.choices[0].message.content:
-                raise Exception("Empty response from Liara AI")
-            
-            content = response.choices[0].message.content.strip()
-            
-            # Parse JSON response
-            try:
-                # Handle potential markdown code blocks
-                if content.startswith("```"):
-                    content = content.split("```")[1]
-                    if content.startswith("json"):
-                        content = content[4:]
-                    content = content.strip()
-                
-                result = json.loads(content)
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse AI response as JSON: {content}")
-                raise Exception(f"Invalid JSON from AI: {e}")
-            
-            # Validate response structure
-            keywords = result.get('keywords', [])
-            target_description = result.get('target_description', '')
-            
-            if not keywords:
-                logger.warning("No keywords generated, using fallback")
-                keywords = self._fallback_keywords(project_inputs)
-            
-            if not target_description:
-                logger.warning("No target description generated, using fallback")
-                target_description = self._fallback_description(project_inputs)
-            
-            # Ensure we have 8-12 keywords
-            keywords = keywords[:12]  # Cap at 12
-            if len(keywords) < 8:
-                # Add some generic terms if needed
-                generic = ['startup', 'technology', 'innovation', 'platform', 'solution']
-                for term in generic:
-                    if term not in keywords and len(keywords) < 8:
-                        keywords.append(term)
-            
-            logger.info(f"Generated {len(keywords)} keywords: {keywords[:5]}...")
-            logger.info(f"Generated target description: {target_description[:100]}...")
-            
-            return {
-                'keywords': keywords,
-                'target_description': target_description
-            }
-            
-        except Exception as e:
-            logger.error(f"Keyword generation failed: {e}")
-            # Return fallback values instead of failing
-            return {
-                'keywords': self._fallback_keywords(project_inputs),
-                'target_description': self._fallback_description(project_inputs)
-            }
-    
-    def _fallback_keywords(self, inputs: Dict[str, Any]) -> List[str]:
-        """Generate fallback keywords from project inputs."""
-        keywords = []
+            arguments = json.loads(tool_call.function.arguments)
+        except json.JSONDecodeError as e:
+            raise Exception(f"Failed to parse tool arguments as JSON: {e}")
         
-        # Add startup name
-        if inputs.get('startup_name'):
-            keywords.append(inputs['startup_name'])
+        keywords = arguments.get('keywords', [])
+        target_description = arguments.get('target_description', '')
         
-        # Extract words from description
-        if inputs.get('startup_description'):
-            words = inputs['startup_description'].split()
-            keywords.extend([w for w in words[:15] if len(w) > 4])
+        # Validate we got keywords
+        if not keywords or len(keywords) < 3:
+            raise Exception(f"AI generated insufficient keywords: {keywords}")
         
-        # Add business model
-        if inputs.get('business_model'):
-            keywords.append(inputs['business_model'])
+        # Validate keyword quality - reject if they're just single words extracted from description
+        bad_keywords = ['strategic', 'platform', 'designed', 'support', 'making', 'using', 'through']
+        bad_count = sum(1 for kw in keywords if kw.lower() in bad_keywords)
+        if bad_count > 2:
+            raise Exception(f"AI generated low-quality keywords with generic words: {keywords}")
         
-        # Add research goal
-        if inputs.get('research_goal'):
-            keywords.append(inputs['research_goal'])
+        logger.info(f"✅ AI generated {len(keywords)} keywords: {keywords}")
+        logger.info(f"📝 Target description: {target_description[:100]}...")
         
-        # Add inspiration sources
-        if inputs.get('inspiration_sources'):
-            sources = inputs['inspiration_sources'].split(',')
-            keywords.extend([s.strip() for s in sources[:3]])
-        
-        # Deduplicate and limit
-        keywords = list(dict.fromkeys(keywords))[:12]
-        
-        return keywords if keywords else ['startup', 'technology', 'innovation']
-    
-    def _fallback_description(self, inputs: Dict[str, Any]) -> str:
-        """Generate fallback target description from project inputs."""
-        parts = []
-        
-        if inputs.get('startup_name'):
-            parts.append(inputs['startup_name'])
-        
-        if inputs.get('startup_description'):
-            parts.append(inputs['startup_description'][:200])
-        
-        if inputs.get('target_audience'):
-            parts.append(f"targeting {inputs['target_audience']}")
-        
-        return '. '.join(parts) if parts else "Innovative technology startup."
+        return {
+            'keywords': keywords[:12],  # Cap at 12
+            'target_description': target_description
+        }
 
 
 # Async wrapper for use in async contexts

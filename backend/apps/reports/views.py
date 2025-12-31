@@ -148,6 +148,63 @@ class ReportViewSet(viewsets.ReadOnlyModelViewSet):
             "v1": ReportVersionSerializer(version1).data,
             "v2": ReportVersionSerializer(version2).data,
         })
+    
+    @action(detail=True, methods=['get'])
+    def sections(self, request, project_id=None, pk=None):
+        """
+        Get report sections as structured JSON data from S3.
+        Returns analysis sections for rendering in the React frontend.
+        """
+        from services.report_storage import report_storage
+        
+        report = self.get_object()
+        project = report.project
+        
+        # Get org_id
+        org_id = str(project.organization_id) if project.organization_id else 'default'
+        
+        logger.info(f"📖 Fetching sections for report {report.id}")
+        logger.info(f"   Project: {project.id}, Org: {org_id}")
+        logger.info(f"   Report type: {report.report_type}, Version: {report.current_version}")
+        
+        try:
+            # Get sections from S3
+            sections_data = report_storage.get_all_sections(
+                project_id=str(project.id),
+                org_id=org_id,
+                version=report.current_version,
+                report_type=report.report_type
+            )
+            
+            logger.info(f"   Sections found: {len(sections_data.get('sections', []))}")
+            
+            # If no sections found, return empty with debug info
+            if not sections_data.get('sections'):
+                logger.warning(f"❌ No sections found in S3 for report {report.id}")
+                logger.warning(f"   Expected path: organizations/{org_id}/projects/{project.id}/reports/{report.report_type}/v{report.current_version}/")
+                return Response({
+                    'metadata': None,
+                    'sections': [],
+                    'debug': {
+                        'org_id': org_id,
+                        'project_id': str(project.id),
+                        'report_type': report.report_type,
+                        'version': report.current_version,
+                        'expected_path': f"organizations/{org_id}/projects/{project.id}/reports/{report.report_type}/v{report.current_version}/"
+                    }
+                })
+            
+            logger.info(f"✅ Returning {len(sections_data.get('sections', []))} sections")
+            return Response(sections_data)
+            
+        except Exception as e:
+            logger.error(f"❌ Error fetching sections for report {report.id}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return Response(
+                {"error": str(e), "sections": []},
+                status=status.HTTP_200_OK
+            )
 
 
 class StatusUpdateView(APIView):

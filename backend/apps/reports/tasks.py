@@ -66,36 +66,6 @@ def get_project_inputs_dict(inputs):
         'inspiration_sources': inputs.inspiration_sources or '',
     }
 
-
-def build_search_keywords(inputs) -> list:
-    """Build search keywords from project inputs."""
-    keywords = []
-    
-    # Add startup name variations
-    if inputs.startup_name:
-        keywords.append(inputs.startup_name)
-    
-    # Extract keywords from description
-    if inputs.startup_description:
-        # Take first 3-5 significant words
-        words = inputs.startup_description.split()[:20]
-        keywords.extend([w for w in words if len(w) > 4])
-    
-    # Add research goal keywords
-    if inputs.research_goal:
-        keywords.append(inputs.research_goal)
-    
-    # Add inspiration sources
-    if inputs.inspiration_sources:
-        sources = inputs.inspiration_sources.split(',')
-        keywords.extend([s.strip() for s in sources[:5]])
-    
-    # Deduplicate and limit
-    keywords = list(dict.fromkeys(keywords))[:10]
-    
-    return keywords if keywords else ['startup', 'technology']
-
-
 @shared_task(bind=True, queue='reports')
 def generate_crunchbase_report(self, report_id, user_id):
     """
@@ -112,6 +82,7 @@ def generate_crunchbase_report(self, report_id, user_id):
     from apps.users.models import User
     from services.scrapers.crunchbase_scraper import crunchbase_scraper
     from services.crunchbase_analysis import CrunchbaseAnalysisPipeline, generate_analysis_html
+    from services.report_storage import report_storage
     from core.storage import storage_service
     
     report = None
@@ -137,45 +108,39 @@ def generate_crunchbase_report(self, report_id, user_id):
         
         # Check if we need to generate keywords using AI
         if not inputs.extracted_keywords or len(inputs.extracted_keywords) == 0:
-            # Generate keywords using Liara AI
-            try:
-                from services.keyword_generator import KeywordGenerator
-                
-                tracker.update_step_message('init', "Generating AI-powered search keywords...")
-                logger.info("🔑 Generating search keywords using Liara AI...")
-                generator = KeywordGenerator()
-                project_input_dict = get_project_inputs_dict(inputs)
-                search_params = generator.generate(project_input_dict)
-                
-                keywords = search_params['keywords']
-                target_description = search_params['target_description']
-                
-                # Save generated keywords to project for future use
-                inputs.extracted_keywords = keywords
-                inputs.target_description = target_description
-                inputs.save(update_fields=['extracted_keywords', 'target_description'])
-                
-                # Add each keyword as a separate step detail for visibility
-                for kw in keywords:
-                    tracker.add_step_detail(
-                        'init',
-                        'keyword',
-                        kw,
-                        {'keyword': kw}
-                    )
-                
-                # Update step message
-                keywords_preview = ', '.join(keywords[:5])
-                if len(keywords) > 5:
-                    keywords_preview += f' +{len(keywords) - 5} more'
-                tracker.update_step_message('init', f"Keywords ready: {keywords_preview}")
-                logger.info(f"✅ AI generated {len(keywords)} keywords: {keywords[:5]}...")
-                
-            except Exception as e:
-                logger.warning(f"AI keyword generation failed, using fallback: {e}")
-                keywords = build_search_keywords(inputs)
-                target_description = inputs.startup_description or inputs.startup_name or ''
-                tracker.add_step_detail('init', 'fallback', f"Using fallback keywords: {e}")
+            # Generate keywords using Liara AI - NO FALLBACK
+            from services.keyword_generator import KeywordGenerator
+            
+            tracker.update_step_message('init', "Generating AI-powered search keywords...")
+            logger.info("🔑 Generating search keywords using Liara AI (forced tool calling)...")
+            
+            generator = KeywordGenerator()
+            project_input_dict = get_project_inputs_dict(inputs)
+            search_params = generator.generate(project_input_dict)  # Will raise exception if fails
+            
+            keywords = search_params['keywords']
+            target_description = search_params['target_description']
+            
+            # Save generated keywords to project for future use
+            inputs.extracted_keywords = keywords
+            inputs.target_description = target_description
+            inputs.save(update_fields=['extracted_keywords', 'target_description'])
+            
+            # Add each keyword as a separate step detail for visibility
+            for kw in keywords:
+                tracker.add_step_detail(
+                    'init',
+                    'keyword',
+                    kw,
+                    {'keyword': kw}
+                )
+            
+            # Update step message
+            keywords_preview = ', '.join(keywords[:5])
+            if len(keywords) > 5:
+                keywords_preview += f' +{len(keywords) - 5} more'
+            tracker.update_step_message('init', f"Keywords ready: {keywords_preview}")
+            logger.info(f"✅ AI generated {len(keywords)} keywords: {keywords[:5]}...")
         else:
             # Use existing keywords
             keywords = inputs.extracted_keywords
@@ -246,6 +211,25 @@ def generate_crunchbase_report(self, report_id, user_id):
                 'collection_time': collection_time,
                 'similarity_time': similarity_time
             })
+            
+            # Save raw Crunchbase data to JSON file
+            try:
+                org_id = str(project.organization_id) if project.organization_id else 'default'
+                report_storage.save_crunchbase_raw_data(
+                    project_id=str(project.id),
+                    org_id=org_id,
+                    version=report.current_version + 1,
+                    raw_data={
+                        'all_companies': all_companies,
+                        'top_companies': top_companies,
+                        'metadata': metadata,
+                        'keywords': keywords,
+                        'target_description': target_description,
+                    }
+                )
+                logger.info(f"✅ Saved Crunchbase raw data JSON for project {project.id}")
+            except Exception as e:
+                logger.warning(f"Failed to save Crunchbase raw data JSON: {e}")
             
         except Exception as e:
             logger.warning(f"Crunchbase scraper failed: {e}")
@@ -355,6 +339,19 @@ def generate_crunchbase_report(self, report_id, user_id):
             )
             await complete_step('company_overview')
             
+            # Save company overview to JSON
+            try:
+                org_id = str(project.organization_id) if project.organization_id else 'default'
+                report_storage.save_analysis_section(
+                    project_id=str(project.id),
+                    org_id=org_id,
+                    version=report.current_version + 1,
+                    section_type='company_overview',
+                    content=overview
+                )
+            except Exception as e:
+                logger.warning(f"Failed to save company overview JSON: {e}")
+            
             # Per-company reports
             per_company = {}
             report_types = [
@@ -378,6 +375,21 @@ def generate_crunchbase_report(self, report_id, user_id):
                             'company_name': company_name,
                             'content': content
                         })
+                        
+                        # Save per-company analysis to JSON
+                        try:
+                            org_id = str(project.organization_id) if project.organization_id else 'default'
+                            report_storage.save_analysis_section(
+                                project_id=str(project.id),
+                                org_id=org_id,
+                                version=report.current_version + 1,
+                                section_type=step_key,
+                                content=content,
+                                company_name=company_name
+                            )
+                        except Exception as save_err:
+                            logger.warning(f"Failed to save {step_key} JSON for {company_name}: {save_err}")
+                            
                     except Exception as e:
                         logger.error(f"Analysis failed for {company_name}: {e}")
                         per_company[step_key].append({
@@ -406,6 +418,19 @@ def generate_crunchbase_report(self, report_id, user_id):
                         prompt_fn(reports, num_companies),
                         max_tokens=4000
                     )
+                    
+                    # Save summary to JSON
+                    try:
+                        org_id = str(project.organization_id) if project.organization_id else 'default'
+                        report_storage.save_analysis_summary(
+                            project_id=str(project.id),
+                            org_id=org_id,
+                            version=report.current_version + 1,
+                            summary_type=sum_key,
+                            content=summaries[sum_key]
+                        )
+                    except Exception as save_err:
+                        logger.warning(f"Failed to save {sum_key} JSON: {save_err}")
             
             await complete_step('summaries', {'summaries_generated': len(summaries)})
             
@@ -525,6 +550,29 @@ def generate_crunchbase_report(self, report_id, user_id):
         report.completed_at = timezone.now()
         report.save()
         
+        # Save report metadata JSON
+        try:
+            org_id = str(project.organization_id) if project.organization_id else 'default'
+            report_storage.save_report_metadata(
+                project_id=str(project.id),
+                org_id=org_id,
+                version=report.current_version,
+                metadata={
+                    'report_id': str(report.id),
+                    'project_id': str(project.id),
+                    'org_id': org_id,
+                    'keywords': keywords,
+                    'target_description': target_description,
+                    'company_count': analysis_result['company_count'],
+                    'sections_count': section_order,
+                    'generated_at': report.completed_at.isoformat() if report.completed_at else None,
+                    'version': report.current_version,
+                }
+            )
+            logger.info(f"✅ Saved report metadata JSON for project {project.id}")
+        except Exception as e:
+            logger.warning(f"Failed to save report metadata JSON: {e}")
+        
         tracker.complete_step('save', {'version': report.current_version, 'sections': section_order})
         
         logger.info(f"✅ Crunchbase report generated for project {project.id} with {section_order} sections")
@@ -594,38 +642,33 @@ def generate_tracxn_report(self, report_id, user_id):
         
         # Check if we need to generate keywords using AI
         if not inputs.extracted_keywords or len(inputs.extracted_keywords) == 0:
-            try:
-                from services.keyword_generator import KeywordGenerator
-                
-                tracker.update_step_message('init', "Generating AI-powered search keywords...")
-                logger.info("🔑 Generating search keywords using Liara AI...")
-                generator = KeywordGenerator()
-                project_input_dict = get_project_inputs_dict(inputs)
-                search_params = generator.generate(project_input_dict)
-                
-                keywords = search_params['keywords']
-                target_description = search_params['target_description']
-                
-                # Save generated keywords
-                inputs.extracted_keywords = keywords
-                inputs.target_description = target_description
-                inputs.save(update_fields=['extracted_keywords', 'target_description'])
-                
-                # Add keywords as step details
-                for kw in keywords:
-                    tracker.add_step_detail('init', 'keyword', kw, {'keyword': kw})
-                
-                keywords_preview = ', '.join(keywords[:5])
-                if len(keywords) > 5:
-                    keywords_preview += f' +{len(keywords) - 5} more'
-                tracker.update_step_message('init', f"Keywords ready: {keywords_preview}")
-                logger.info(f"✅ AI generated {len(keywords)} keywords")
-                
-            except Exception as e:
-                logger.warning(f"AI keyword generation failed, using fallback: {e}")
-                keywords = build_search_keywords(inputs)
-                target_description = inputs.startup_description or inputs.startup_name or ''
-                tracker.add_step_detail('init', 'fallback', f"Using fallback keywords: {e}")
+            # Generate keywords using Liara AI - NO FALLBACK
+            from services.keyword_generator import KeywordGenerator
+            
+            tracker.update_step_message('init', "Generating AI-powered search keywords...")
+            logger.info("🔑 Generating search keywords using Liara AI (forced tool calling)...")
+            
+            generator = KeywordGenerator()
+            project_input_dict = get_project_inputs_dict(inputs)
+            search_params = generator.generate(project_input_dict)  # Will raise exception if fails
+            
+            keywords = search_params['keywords']
+            target_description = search_params['target_description']
+            
+            # Save generated keywords
+            inputs.extracted_keywords = keywords
+            inputs.target_description = target_description
+            inputs.save(update_fields=['extracted_keywords', 'target_description'])
+            
+            # Add keywords as step details
+            for kw in keywords:
+                tracker.add_step_detail('init', 'keyword', kw, {'keyword': kw})
+            
+            keywords_preview = ', '.join(keywords[:5])
+            if len(keywords) > 5:
+                keywords_preview += f' +{len(keywords) - 5} more'
+            tracker.update_step_message('init', f"Keywords ready: {keywords_preview}")
+            logger.info(f"✅ AI generated {len(keywords)} keywords")
         else:
             keywords = inputs.extracted_keywords
             target_description = inputs.target_description or inputs.startup_description or ''

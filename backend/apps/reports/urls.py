@@ -20,6 +20,10 @@ urlpatterns = [
     path('project/<uuid:project_id>/<uuid:pk>/compare/', views.ReportViewSet.as_view({
         'get': 'compare',
     }), name='report-compare'),
+    path('project/<uuid:project_id>/<uuid:pk>/sections/', views.ReportViewSet.as_view({
+        'get': 'sections',
+    }), name='report-sections'),
     # Internal API for crunchbase_api container to send status updates
     path('status-update/', views.StatusUpdateView.as_view(), name='report-status-update'),
 ]
+

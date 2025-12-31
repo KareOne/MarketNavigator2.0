@@ -1304,12 +1304,8 @@ export default function ProjectPage() {
                                                                         <button
                                                                             onClick={(e) => {
                                                                                 e.stopPropagation();
-                                                                                // Open report HTML in new tab
-                                                                                const newWindow = window.open('', '_blank');
-                                                                                if (newWindow) {
-                                                                                    newWindow.document.write(report.html_content);
-                                                                                    newWindow.document.close();
-                                                                                }
+                                                                                // Navigate to report page
+                                                                                router.push(`/projects/${projectId}/reports/${report.id}`);
                                                                             }}
                                                                             style={{ padding: "4px 12px", background: "var(--color-primary)", border: "none", borderRadius: "var(--radius-sm)", color: "white", cursor: "pointer", fontSize: "11px", fontWeight: 500 }}
                                                                         >
