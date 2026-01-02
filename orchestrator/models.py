@@ -49,6 +49,7 @@ class Task(BaseModel):
     status: Literal["pending", "assigned", "running", "completed", "failed", "cancelled"] = "pending"
     payload: Dict[str, Any] = Field(default_factory=dict)
     assigned_worker_id: Optional[str] = None
+    target_worker_id: Optional[str] = None  # Preferred worker to route to
     priority: int = 0  # Higher = more priority
     retry_count: int = 0
     max_retries: int = 3
@@ -72,6 +73,7 @@ class TaskSubmitRequest(BaseModel):
     report_id: str
     payload: Dict[str, Any]
     priority: int = 0
+    target_worker_id: Optional[str] = None  # Route to specific worker by ID
 
 
 class TaskResponse(BaseModel):

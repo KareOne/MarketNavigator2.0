@@ -69,6 +69,7 @@ class TaskQueue:
             action=request.action,
             payload=request.payload,
             priority=request.priority,
+            target_worker_id=request.target_worker_id,  # Route to specific worker
             max_retries=config.TASK_RETRY_LIMIT,
             created_at=datetime.utcnow()
         )
@@ -120,8 +121,21 @@ class TaskQueue:
             logger.warning(f"Task {task_id} not found in store")
             return None
         
-        # Select worker (simple round-robin - just pick first idle)
-        worker = idle_workers[0]
+        # Select worker - prioritize target_worker_id if specified
+        worker = None
+        if task.target_worker_id:
+            # Try to find the target worker
+            for w in idle_workers:
+                if w.worker_id == task.target_worker_id:
+                    worker = w
+                    logger.info(f"📍 Routing to target worker: {task.target_worker_id}")
+                    break
+            if not worker:
+                logger.warning(f"Target worker {task.target_worker_id} not idle, using first available")
+        
+        # Fallback to first idle worker
+        if not worker:
+            worker = idle_workers[0]
         
         # Update task
         task.status = "assigned"

@@ -52,18 +52,16 @@ interface TestResult {
 }
 
 // Test Worker Panel Component
-function TestWorkerPanel({ token }: { token: string | null }) {
-    const [selectedApiType, setSelectedApiType] = useState("crunchbase");
+function TestWorkerPanel({ token, workers }: { token: string | null; workers: Worker[] }) {
+    const [selectedWorkerId, setSelectedWorkerId] = useState<string>("");
     const [selectedAction, setSelectedAction] = useState("health");
     const [testPayload, setTestPayload] = useState("{}");
     const [isTestRunning, setIsTestRunning] = useState(false);
     const [testResult, setTestResult] = useState<TestResult | null>(null);
 
-    const apiTypes = [
-        { value: "crunchbase", label: "Crunchbase" },
-        { value: "tracxn", label: "Tracxn" },
-        { value: "social", label: "Social" },
-    ];
+    // Get selected worker's api_type
+    const selectedWorker = workers.find(w => w.worker_id === selectedWorkerId);
+    const selectedApiType = selectedWorker?.api_type || "crunchbase";
 
     const actions: Record<string, { value: string; label: string }[]> = {
         crunchbase: [
@@ -97,38 +95,97 @@ function TestWorkerPanel({ token }: { token: string | null }) {
         }, null, 2),
     };
 
+    const [taskStatus, setTaskStatus] = useState<string>("");
+
     const handleTest = async () => {
         setIsTestRunning(true);
         setTestResult(null);
+        setTaskStatus("Connecting...");
+
+        let payload = {};
+        try {
+            payload = JSON.parse(testPayload);
+        } catch {
+            setTestResult({ success: false, error: "Invalid JSON payload" });
+            setIsTestRunning(false);
+            return;
+        }
+
+        // Build WebSocket URL
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsHost = API_URL.replace(/^https?:\/\//, '');
+        const wsUrl = `${wsProtocol}//${wsHost}/ws/admin/tasks/?token=${token}`;
 
         try {
-            let payload = {};
-            try {
-                payload = JSON.parse(testPayload);
-            } catch {
-                setTestResult({ success: false, error: "Invalid JSON payload" });
-                setIsTestRunning(false);
-                return;
-            }
+            const ws = new WebSocket(wsUrl);
 
-            const response = await fetch(`${API_URL}/api/admin/orchestrator/test-task/`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`,
-                },
-                body: JSON.stringify({
+            ws.onopen = () => {
+                setTaskStatus("Submitting task...");
+                ws.send(JSON.stringify({
+                    type: 'submit_test',
                     api_type: selectedApiType,
                     action: selectedAction,
                     payload,
-                }),
-            });
+                    target_worker_id: selectedWorkerId || undefined,
+                }));
+            };
 
-            const data = await response.json();
-            setTestResult(data);
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+
+                switch (data.type) {
+                    case 'task_submitted':
+                        setTaskStatus("Task submitted, waiting for worker...");
+                        break;
+                    case 'task_started':
+                        setTestResult(prev => ({ ...prev, task_id: data.task_id } as TestResult));
+                        setTaskStatus(`Running on worker (${data.task_id?.substring(0, 8)}...)`);
+                        break;
+                    case 'task_status':
+                        setTaskStatus(`Status: ${data.status}`);
+                        break;
+                    case 'task_complete':
+                        setTestResult({
+                            success: data.success,
+                            task_id: data.task_id,
+                            status: data.success ? 'completed' : 'failed',
+                            result: data.result,
+                            error: data.error,
+                        });
+                        setTaskStatus("");
+                        setIsTestRunning(false);
+                        ws.close();
+                        break;
+                    case 'task_error':
+                    case 'error':
+                        setTestResult({
+                            success: false,
+                            error: data.error || data.message,
+                        });
+                        setTaskStatus("");
+                        setIsTestRunning(false);
+                        ws.close();
+                        break;
+                }
+            };
+
+            ws.onerror = (error) => {
+                console.error("WebSocket error:", error);
+                setTestResult({ success: false, error: "WebSocket connection failed" });
+                setTaskStatus("");
+                setIsTestRunning(false);
+            };
+
+            ws.onclose = () => {
+                if (isTestRunning) {
+                    setTaskStatus("");
+                    setIsTestRunning(false);
+                }
+            };
+
         } catch (err) {
             setTestResult({ success: false, error: String(err) });
-        } finally {
+            setTaskStatus("");
             setIsTestRunning(false);
         }
     };
@@ -139,12 +196,12 @@ function TestWorkerPanel({ token }: { token: string | null }) {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: "16px", alignItems: "end" }}>
                 <div>
                     <label style={{ display: "block", fontSize: "12px", color: "var(--color-text-muted)", marginBottom: "6px" }}>
-                        Worker Type
+                        Worker
                     </label>
                     <select
-                        value={selectedApiType}
+                        value={selectedWorkerId}
                         onChange={(e) => {
-                            setSelectedApiType(e.target.value);
+                            setSelectedWorkerId(e.target.value);
                             setSelectedAction("health");
                         }}
                         style={{
@@ -157,8 +214,11 @@ function TestWorkerPanel({ token }: { token: string | null }) {
                             fontSize: "14px"
                         }}
                     >
-                        {apiTypes.map((t) => (
-                            <option key={t.value} value={t.value}>{t.label}</option>
+                        <option value="">Select a worker...</option>
+                        {workers.filter(w => w.status === "idle").map((w) => (
+                            <option key={w.worker_id} value={w.worker_id}>
+                                {(w.metadata?.name as string) || w.worker_id.substring(0, 8)} ({w.api_type})
+                            </option>
                         ))}
                     </select>
                 </div>
@@ -242,6 +302,22 @@ function TestWorkerPanel({ token }: { token: string | null }) {
                     )}
                 </button>
             </div>
+
+            {/* Real-time Status */}
+            {taskStatus && (
+                <div style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "10px",
+                    padding: "12px 16px",
+                    background: "rgba(59, 130, 246, 0.1)",
+                    border: "1px solid rgba(59, 130, 246, 0.3)",
+                    borderRadius: "var(--radius-md)",
+                }}>
+                    <div className="spinner" style={{ width: "16px", height: "16px", borderColor: "#3b82f6", borderTopColor: "transparent" }}></div>
+                    <span style={{ color: "#3b82f6", fontSize: "14px" }}>{taskStatus}</span>
+                </div>
+            )}
 
             {/* Result */}
             {testResult && (
@@ -775,7 +851,7 @@ export default function AdminPage() {
                                 </div>
 
                                 <div style={{ padding: "24px" }}>
-                                    <TestWorkerPanel token={token} />
+                                    <TestWorkerPanel token={token} workers={workers} />
                                 </div>
                             </div>
                         </>

@@ -66,10 +66,10 @@ class CrunchbaseScraperClient(RetryableScraperClient):
         action: str,
         payload: Dict[str, Any],
         report_id: str,
-        timeout: float = 600.0
+        timeout: float = 10800.0  # 3 hour timeout
     ) -> Dict[str, Any]:
         """Submit task to orchestrator and wait for result."""
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=30.0)) as client:
             # Submit task
             submit_response = await client.post(
                 f"{self.orchestrator_url}/tasks/submit",
@@ -90,7 +90,7 @@ class CrunchbaseScraperClient(RetryableScraperClient):
             logger.info(f"📤 Task submitted to orchestrator: {task_id}")
             
             # Poll for completion
-            poll_interval = 2.0
+            poll_interval = 5.0  # Check every 5 seconds
             elapsed = 0.0
             while elapsed < timeout:
                 await asyncio.sleep(poll_interval)

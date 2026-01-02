@@ -133,8 +133,12 @@ class OrchestratorTestTaskView(APIView):
         import uuid
         test_report_id = f"test-{uuid.uuid4()}"
         
+        # 3 hour timeout (10800 seconds)
+        TIMEOUT_SECONDS = 10800
+        POLL_INTERVAL = 5  # Check every 5 seconds
+        
         try:
-            with httpx.Client(timeout=30.0) as client:
+            with httpx.Client(timeout=httpx.Timeout(TIMEOUT_SECONDS, connect=30.0)) as client:
                 response = client.post(
                     f"{ORCHESTRATOR_URL}/tasks/submit",
                     json={
@@ -150,10 +154,11 @@ class OrchestratorTestTaskView(APIView):
                     task_data = response.json()
                     task_id = task_data.get("task_id")
                     
-                    # Wait for task completion (max 30 seconds for tests)
+                    # Wait for task completion (max 3 hours)
                     import time
-                    for _ in range(15):  # 15 * 2s = 30s max
-                        time.sleep(2)
+                    max_iterations = TIMEOUT_SECONDS // POLL_INTERVAL
+                    for _ in range(max_iterations):
+                        time.sleep(POLL_INTERVAL)
                         status_response = client.get(f"{ORCHESTRATOR_URL}/tasks/{task_id}")
                         if status_response.status_code == 200:
                             status_data = status_response.json()
@@ -174,12 +179,12 @@ class OrchestratorTestTaskView(APIView):
                                     "error": status_data.get("error")
                                 }, status=status.HTTP_400_BAD_REQUEST)
                     
-                    # Timeout
+                    # Timeout (should rarely happen with 3 hour limit)
                     return Response({
                         "success": False,
                         "task_id": task_id,
                         "status": "timeout",
-                        "error": "Task did not complete within 30 seconds"
+                        "error": f"Task did not complete within {TIMEOUT_SECONDS} seconds"
                     }, status=status.HTTP_408_REQUEST_TIMEOUT)
                 else:
                     return Response(
