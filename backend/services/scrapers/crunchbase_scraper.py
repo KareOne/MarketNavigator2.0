@@ -150,15 +150,16 @@ class CrunchbaseScraperClient(RetryableScraperClient):
         if report_id:
             request_data["report_id"] = report_id
         
-        # Try orchestrator first if enabled
-        if await self._check_orchestrator_available():
+        # Try orchestrator if enabled and workers available
+        orchestrator_available = await self._check_orchestrator_available()
+        if orchestrator_available:
             try:
                 logger.info("🔄 Using orchestrator for Crunchbase search (remote worker)")
                 result = await self._submit_to_orchestrator(
                     action="search_with_rank",
                     payload=request_data,
                     report_id=report_id or "direct-search",
-                    timeout=600.0
+                    # Use default 3-hour timeout - long tasks like scraping can take a while
                 )
                 logger.info(
                     f"Crunchbase (orchestrator) returned: "
@@ -167,7 +168,10 @@ class CrunchbaseScraperClient(RetryableScraperClient):
                 )
                 return result
             except Exception as e:
-                logger.warning(f"Orchestrator failed, falling back to direct API: {e}")
+                # If orchestrator has workers but failed, don't fall back to direct API
+                # (there's no local crunchbase_api container anyway)
+                logger.error(f"Orchestrator task failed: {e}")
+                raise ExternalAPIError(f"Crunchbase scraper (orchestrator) failed: {e}")
         
         # Fallback to direct API call
         try:
