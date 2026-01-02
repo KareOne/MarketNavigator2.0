@@ -170,6 +170,7 @@ export default function ProjectPage() {
     const [collapsedSteps, setCollapsedSteps] = useState<Record<string, boolean>>({});
 
     const wsRef = useRef<WebSocket | null>(null);
+    const wsReconnectAttempts = useRef<number>(0);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -304,7 +305,22 @@ export default function ProjectPage() {
     };
 
     const connectWebSocket = () => {
+        // Close existing connection if any
+        if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+            wsRef.current.close();
+        }
+
         const ws = new WebSocket(`${WS_URL}/ws/projects/${projectId}/chat/?token=${token}`);
+        const maxReconnectAttempts = 10;
+        const baseDelay = 1000; // 1 second
+
+        ws.onopen = () => {
+            console.log('🔌 WebSocket connected');
+            wsReconnectAttempts.current = 0; // Reset on successful connection
+            // Refresh data when reconnected to ensure UI is up to date
+            fetchProjectData();
+        };
+
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
             if (data.type === "history") {
@@ -321,8 +337,54 @@ export default function ProjectPage() {
                 handleAutoFill(data.field, data.value, data.confidence);
             }
         };
+
+        ws.onerror = (error) => {
+            console.error('❌ WebSocket error:', error);
+        };
+
+        ws.onclose = (event) => {
+            console.log('🔌 WebSocket closed:', event.code, event.reason);
+
+            // Don't reconnect if closed intentionally (code 1000) or auth issues
+            if (event.code === 1000 || event.code === 4001) {
+                return;
+            }
+
+            // Auto-reconnect with exponential backoff
+            if (wsReconnectAttempts.current < maxReconnectAttempts) {
+                wsReconnectAttempts.current++;
+                const delay = Math.min(baseDelay * Math.pow(2, wsReconnectAttempts.current - 1), 30000); // Max 30s
+                console.log(`⏳ Reconnecting in ${delay}ms (attempt ${wsReconnectAttempts.current}/${maxReconnectAttempts})...`);
+                setTimeout(() => {
+                    if (token && projectId) {
+                        connectWebSocket();
+                    }
+                }, delay);
+            } else {
+                console.error('❌ Max reconnection attempts reached');
+            }
+        };
+
         wsRef.current = ws;
     };
+
+    // Handle page visibility changes - refresh data when tab becomes visible again
+    useEffect(() => {
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible' && token && projectId) {
+                console.log('👁️ Page became visible, refreshing data...');
+                fetchProjectData();
+                // Reconnect WebSocket if it was closed
+                if (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED) {
+                    wsReconnectAttempts.current = 0;
+                    connectWebSocket();
+                }
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    }, [token, projectId]);
 
     // Handle auto-fill from AI
     const handleAutoFill = (field: string, value: string, confidence: number) => {
