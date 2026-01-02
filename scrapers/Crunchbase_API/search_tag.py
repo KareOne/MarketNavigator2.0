@@ -9,19 +9,18 @@ from database import save_company, already_scraped_urls, get_company
 from datetime import datetime, timedelta
 
 
-async def _perform_search(page, search_hashtag, use_ai_search=False):
+async def _perform_search(page, search_hashtag, use_ai_search=True):
     """
-    Performs a search on Crunchbase using the Description Keywords filter.
+    Performs a search on Crunchbase.
     
-    The workflow is:
-    1. Click on "Overview" filter button (opens a popup)
-    2. Find the "Description Keywords" input field in the popup
-    3. Fill in the search term and press Enter
+    Two modes:
+    - AI Search (use_ai_search=True): Uses the main search bar - simpler and more reliable
+    - Filter Search (use_ai_search=False): Uses the Description Keywords filter via Overview popup
     
     Args:
         page: Playwright page instance
         search_hashtag: The search keyword/phrase
-        use_ai_search: Deprecated parameter, kept for backwards compatibility
+        use_ai_search: If True, use AI search bar. If False, use Description Keywords filter.
         
     Returns:
         True if search was successful, False otherwise
@@ -36,42 +35,24 @@ async def _perform_search(page, search_hashtag, use_ai_search=False):
         # Wait for page to be fully loaded
         await asyncio.sleep(random.uniform(SLEEP_DELAY, 2 * SLEEP_DELAY))
         
-        # Step 1: Click on Overview filter button
-        overview_selectors = [
-            'button:has-text("Overview")',
-            'button.filter-group-button:has-text("Overview")',
-        ]
-        
-        overview_clicked = False
-        for selector in overview_selectors:
-            try:
-                overview_element = page.locator(selector).first
-                if await overview_element.is_visible(timeout=2000):
-                    await overview_element.click()
-                    await asyncio.sleep(random.uniform(SLEEP_DELAY, 2 * SLEEP_DELAY))
-                    overview_clicked = True
-                    break
-            except Exception:
-                continue
-        
-        # If Overview not found, try expanding the search builder first
-        if not overview_clicked:
-            expand_selectors = [
-                'button[aria-label="Edit Search"]',
-                'expand-toggle-button button',
+        if use_ai_search:
+            # AI Search: Use the main search bar - simpler and more reliable
+            search_bar = page.get_by_placeholder("Search for companies, investors, and more")
+            await search_bar.wait_for(timeout=30000)
+            await search_bar.fill(search_hashtag)
+            await asyncio.sleep(random.uniform(SLEEP_DELAY, 2 * SLEEP_DELAY))
+            await search_bar.press("Enter")
+            await asyncio.sleep(random.uniform(SLEEP_DELAY, 2 * SLEEP_DELAY))
+            return True
+        else:
+            # Filter Search: Use the Description Keywords filter via Overview popup
+            # Step 1: Click on Overview filter button
+            overview_selectors = [
+                'button:has-text("Overview")',
+                'button.filter-group-button:has-text("Overview")',
             ]
             
-            for selector in expand_selectors:
-                try:
-                    expand_button = page.locator(selector).first
-                    if await expand_button.is_visible(timeout=3000):
-                        await expand_button.click()
-                        await asyncio.sleep(3)  # Wait for expansion
-                        break
-                except Exception:
-                    continue
-            
-            # Try finding Overview button again after expansion
+            overview_clicked = False
             for selector in overview_selectors:
                 try:
                     overview_element = page.locator(selector).first
@@ -82,47 +63,76 @@ async def _perform_search(page, search_hashtag, use_ai_search=False):
                         break
                 except Exception:
                     continue
-        
-        if not overview_clicked:
-            print("❌ Could not find Overview filter button")
-            return False
-        
-        # Step 2: Find and fill the Description Keywords input field
-        keywords_input_selectors = [
-            'advanced-filter:has(h4:text("Description Keywords")) input',
-            'div.filter:has(h4:text("Description Keywords")) input',
-            'input[placeholder*="RegTech"]',
-        ]
-        
-        keywords_input = None
-        for selector in keywords_input_selectors:
-            try:
-                inputs = page.locator(selector)
-                count = await inputs.count()
-                if count > 0:
-                    inp = inputs.first
-                    if await inp.is_visible(timeout=3000):
-                        keywords_input = inp
-                        break
-            except Exception:
-                continue
-        
-        if keywords_input:
-            await keywords_input.fill(search_hashtag)
-            await asyncio.sleep(random.uniform(SLEEP_DELAY, 2 * SLEEP_DELAY))
-            await keywords_input.press("Enter")
-            await asyncio.sleep(random.uniform(SLEEP_DELAY, 2 * SLEEP_DELAY))
-            return True
-        else:
-            print("❌ Could not find Description Keywords input")
-            return False
+            
+            # If Overview not found, try expanding the search builder first
+            if not overview_clicked:
+                expand_selectors = [
+                    'button[aria-label="Edit Search"]',
+                    'expand-toggle-button button',
+                ]
+                
+                for selector in expand_selectors:
+                    try:
+                        expand_button = page.locator(selector).first
+                        if await expand_button.is_visible(timeout=3000):
+                            await expand_button.click()
+                            await asyncio.sleep(3)  # Wait for expansion
+                            break
+                    except Exception:
+                        continue
+                
+                # Try finding Overview button again after expansion
+                for selector in overview_selectors:
+                    try:
+                        overview_element = page.locator(selector).first
+                        if await overview_element.is_visible(timeout=2000):
+                            await overview_element.click()
+                            await asyncio.sleep(random.uniform(SLEEP_DELAY, 2 * SLEEP_DELAY))
+                            overview_clicked = True
+                            break
+                    except Exception:
+                        continue
+            
+            if not overview_clicked:
+                print("❌ Could not find Overview filter button")
+                return False
+            
+            # Step 2: Find and fill the Description Keywords input field
+            keywords_input_selectors = [
+                'advanced-filter:has(h4:text("Description Keywords")) input',
+                'div.filter:has(h4:text("Description Keywords")) input',
+                'input[placeholder*="RegTech"]',
+            ]
+            
+            keywords_input = None
+            for selector in keywords_input_selectors:
+                try:
+                    inputs = page.locator(selector)
+                    count = await inputs.count()
+                    if count > 0:
+                        inp = inputs.first
+                        if await inp.is_visible(timeout=3000):
+                            keywords_input = inp
+                            break
+                except Exception:
+                    continue
+            
+            if keywords_input:
+                await keywords_input.fill(search_hashtag)
+                await asyncio.sleep(random.uniform(SLEEP_DELAY, 2 * SLEEP_DELAY))
+                await keywords_input.press("Enter")
+                await asyncio.sleep(random.uniform(SLEEP_DELAY, 2 * SLEEP_DELAY))
+                return True
+            else:
+                print("❌ Could not find Description Keywords input")
+                return False
             
     except Exception as e:
         print(f"❌ Error performing search: {e}")
         return False
 
 
-async def _collect_companies_with_descriptions_impl(search_hashtag, num_companies=5, use_ai_search=False):
+async def _collect_companies_with_descriptions_impl(search_hashtag, num_companies=5, use_ai_search=True):
     """
     Internal implementation of collect_companies_with_descriptions.
     This function is queued to prevent concurrent browser operations.
@@ -272,7 +282,7 @@ async def _collect_companies_with_descriptions_impl(search_hashtag, num_companie
     return companies_data
 
 
-async def collect_companies_with_descriptions(search_hashtag, num_companies=5, use_ai_search=False):
+async def collect_companies_with_descriptions(search_hashtag, num_companies=5, use_ai_search=True):
     """
     Collects company URLs and full descriptions from the search table.
     Uses persistent browser manager with queuing for concurrent request safety.
@@ -299,7 +309,7 @@ async def collect_companies_with_descriptions(search_hashtag, num_companies=5, u
     )
 
 
-async def _collect_companies_with_rank_impl(search_hashtag, num_companies=5, use_ai_search=False):
+async def _collect_companies_with_rank_impl(search_hashtag, num_companies=5, use_ai_search=True):
     """
     Internal implementation of collect_companies_with_rank.
     This function is queued to prevent concurrent browser operations.
@@ -477,7 +487,7 @@ async def _collect_companies_with_rank_impl(search_hashtag, num_companies=5, use
     return companies_data
 
 
-async def collect_companies_with_rank(search_hashtag, num_companies=5, use_ai_search=False):
+async def collect_companies_with_rank(search_hashtag, num_companies=5, use_ai_search=True):
     """
     Collects company URLs, full descriptions, and CB rank from the search table.
     Uses persistent browser manager with queuing for concurrent request safety.
@@ -504,7 +514,7 @@ async def collect_companies_with_rank(search_hashtag, num_companies=5, use_ai_se
     )
 
 
-async def _run_scraper_impl(search_hashtag, num_companies=5, days_threshold=0, use_ai_search=False):
+async def _run_scraper_impl(search_hashtag, num_companies=5, days_threshold=0, use_ai_search=True):
     """
     Internal implementation of run_scraper.
     This function is queued to prevent concurrent browser operations.
@@ -664,7 +674,7 @@ async def _run_scraper_impl(search_hashtag, num_companies=5, days_threshold=0, u
     return results
 
 
-async def run_scraper(search_hashtag, num_companies=5, days_threshold=0, use_ai_search=False):
+async def run_scraper(search_hashtag, num_companies=5, days_threshold=0, use_ai_search=True):
     """
     Main scraper with MySQL storage and resume support.
     Uses persistent browser manager with queuing for concurrent request safety.
