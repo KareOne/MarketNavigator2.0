@@ -366,6 +366,13 @@ CRUNCHBASE_SCRAPER_URL = os.getenv('CRUNCHBASE_SCRAPER_URL', 'http://crunchbase_
 TRACXN_SCRAPER_URL = os.getenv('TRACXN_SCRAPER_URL', 'http://tracxn_api:8008')
 
 # =============================================================================
+# ORCHESTRATOR (Remote Workers)
+# Routes scraper tasks to remote workers when enabled
+# =============================================================================
+USE_ORCHESTRATOR = os.getenv('USE_ORCHESTRATOR', 'false').lower() in ('true', '1', 'yes')
+ORCHESTRATOR_URL = os.getenv('ORCHESTRATOR_URL', 'http://orchestrator:8010')
+
+# =============================================================================
 # INTERNATIONALIZATION
 # =============================================================================
 LANGUAGE_CODE = 'en-us'

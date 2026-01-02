@@ -46,8 +46,9 @@ class CrunchbaseScraperClient(RetryableScraperClient):
         self.orchestrator_url = getattr(settings, 'ORCHESTRATOR_URL', 'http://orchestrator:8010')
     
     async def _check_orchestrator_available(self) -> bool:
-        """Check if orchestrator has available workers."""
+        """Check if orchestrator has any connected workers (tasks will queue if busy)."""
         if not self.use_orchestrator:
+            logger.debug("Orchestrator disabled in settings")
             return False
         
         try:
@@ -55,8 +56,13 @@ class CrunchbaseScraperClient(RetryableScraperClient):
                 response = await client.get(f"{self.orchestrator_url}/workers/crunchbase/stats")
                 if response.status_code == 200:
                     data = response.json()
+                    total_workers = data.get('total', 0)
                     idle_workers = data.get('idle', 0)
-                    return idle_workers > 0
+                    logger.info(f"🔍 Orchestrator check: {total_workers} total workers, {idle_workers} idle")
+                    # Use orchestrator if ANY workers are connected (tasks will queue)
+                    return total_workers > 0
+                else:
+                    logger.warning(f"Orchestrator stats failed: {response.status_code}")
         except Exception as e:
             logger.warning(f"Orchestrator check failed: {e}")
         return False
