@@ -174,9 +174,14 @@ async def _collect_companies_with_descriptions_impl(search_hashtag, num_companie
         consecutive_empty_pages = 0
         max_empty_pages = 3  # Stop after 3 consecutive pages with no companies found
         
+        # Track consecutive failed rows to detect missing columns early
+        consecutive_failed_rows = 0
+        max_failed_rows = 10  # If 10 rows in a row fail, columns are probably missing
+        
         # Collect company data with pagination
         while len(companies_data) < num_companies:
             companies_found_this_page = 0
+            rows_processed_this_page = 0
             
             # Check if still logged in before each page
             if not await browser_mgr.is_logged_in(page):
@@ -239,14 +244,29 @@ async def _collect_companies_with_descriptions_impl(search_hashtag, num_companie
                             'description': description
                         })
                         companies_found_this_page += 1
+                        consecutive_failed_rows = 0  # Reset on success
                         print(f"✅ Collected: {full_url} (desc length: {len(description)})")
                     else:
                         print(f"⚠️ No description found for {full_url}, skipping")
+                        consecutive_failed_rows += 1
                         
                 except Exception as e:
                     print(f"❌ Error extracting row {i}: {e}")
+                    consecutive_failed_rows += 1
                     continue
+                
+                rows_processed_this_page += 1
+                
+                # Early exit if too many consecutive failures (columns probably missing)
+                if consecutive_failed_rows >= max_failed_rows:
+                    print(f"❌ {max_failed_rows} consecutive rows failed. Required columns may be missing from the view.")
+                    print(f"⚠️ Stopping search for this keyword. Collected {len(companies_data)} companies so far.")
+                    break
 
+            # Check if we hit the failed rows limit
+            if consecutive_failed_rows >= max_failed_rows:
+                break  # Exit pagination loop too
+                
             # Track consecutive empty pages
             if companies_found_this_page == 0:
                 consecutive_empty_pages += 1
@@ -345,16 +365,21 @@ async def _collect_companies_with_rank_impl(search_hashtag, num_companies=5, use
         # Use the search helper (supports both standard and AI search)
         await _perform_search(page, search_hashtag, use_ai_search)
 
-        await page.wait_for_selector('grid-row', timeout=60000)
+         await page.wait_for_selector('grid-row', timeout=60000)
         await asyncio.sleep(random.uniform(SLEEP_DELAY, 2 * SLEEP_DELAY))
 
         # Track consecutive pages without finding companies to prevent infinite loops
         consecutive_empty_pages = 0
         max_empty_pages = 3  # Stop after 3 consecutive pages with no companies found
         
+        # Track consecutive failed rows to detect missing columns early
+        consecutive_failed_rows = 0
+        max_failed_rows = 10  # If 10 rows in a row fail, columns are probably missing
+        
         # Collect company data with pagination
         while len(companies_data) < num_companies:
             companies_found_this_page = 0
+            rows_processed_this_page = 0
             
             # Check if still logged in before each page
             if not await browser_mgr.is_logged_in(page):
@@ -439,6 +464,7 @@ async def _collect_companies_with_rank_impl(search_hashtag, num_companies=5, use
                             'cb_rank': cb_rank
                         })
                         companies_found_this_page += 1
+                        consecutive_failed_rows = 0  # Reset on success
                         print(f"✅ Collected: {full_url} (desc length: {len(description)}, CB rank: {cb_rank})")
                     else:
                         missing = []
@@ -447,11 +473,25 @@ async def _collect_companies_with_rank_impl(search_hashtag, num_companies=5, use
                         if cb_rank is None:
                             missing.append("CB rank")
                         print(f"⚠️ Missing {', '.join(missing)} for {full_url}, skipping")
+                        consecutive_failed_rows += 1
                         
                 except Exception as e:
                     print(f"❌ Error extracting row {i}: {e}")
+                    consecutive_failed_rows += 1
                     continue
+                
+                rows_processed_this_page += 1
+                
+                # Early exit if too many consecutive failures (columns probably missing)
+                if consecutive_failed_rows >= max_failed_rows:
+                    print(f"❌ {max_failed_rows} consecutive rows failed. Required columns (description, CB rank) may be missing from the view.")
+                    print(f"⚠️ Stopping search for this keyword. Collected {len(companies_data)} companies so far.")
+                    break
 
+            # Check if we hit the failed rows limit
+            if consecutive_failed_rows >= max_failed_rows:
+                break  # Exit pagination loop too
+                
             # Track consecutive empty pages
             if companies_found_this_page == 0:
                 consecutive_empty_pages += 1
