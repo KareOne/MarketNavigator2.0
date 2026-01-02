@@ -173,9 +173,10 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'UTC'
 CELERY_TASK_TRACK_STARTED = True
-CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes max
+# Time limits must exceed orchestrator TASK_TIMEOUT (2 hours) since Celery waits for orchestrator
+CELERY_TASK_TIME_LIMIT = 3 * 60 * 60  # 3 hours max
 CELERY_WORKER_CONCURRENCY = int(os.getenv('CELERY_CONCURRENCY', '4'))
-CELERY_TASK_SOFT_TIME_LIMIT = 25 * 60  # 25 minutes soft limit
+CELERY_TASK_SOFT_TIME_LIMIT = int(2.5 * 60 * 60)  # 2.5 hours soft limit
 
 # Celery Beat scheduled tasks
 CELERY_BEAT_SCHEDULE = {

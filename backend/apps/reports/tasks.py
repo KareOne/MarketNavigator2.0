@@ -171,6 +171,12 @@ def generate_crunchbase_report(self, report_id, user_id):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
+        # Initialize before try block to prevent undefined var errors on exception
+        all_companies = []
+        top_companies = []
+        metadata = {}
+        result = {}
+        
         try:
             result = loop.run_until_complete(
                 crunchbase_scraper.search_similar_companies(

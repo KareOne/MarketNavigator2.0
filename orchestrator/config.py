@@ -45,7 +45,9 @@ WORKER_HEARTBEAT_INTERVAL = int(os.getenv("WORKER_HEARTBEAT_INTERVAL", "10"))  #
 WORKER_TIMEOUT = int(os.getenv("WORKER_TIMEOUT", "30"))  # seconds before marking offline
 
 # Task settings
-TASK_TIMEOUT = int(os.getenv("TASK_TIMEOUT", "600"))  # 10 minutes default
+# TASK_TIMEOUT is the expected max duration for a task. Redis TTL is 2x this value.
+# Crunchbase scraping can take 30+ minutes, so we set this to 2 hours.
+TASK_TIMEOUT = int(os.getenv("TASK_TIMEOUT", "7200"))  # 2 hours default
 TASK_RETRY_LIMIT = int(os.getenv("TASK_RETRY_LIMIT", "3"))
 
 # Logging
