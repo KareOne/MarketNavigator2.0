@@ -61,6 +61,48 @@ class WorkerAgent:
         # Pending messages to send after reconnect
         self._pending_messages: list = []
     
+    async def _wait_for_local_api(self, max_wait: int = 120) -> bool:
+        """
+        Wait for local API to be ready before accepting tasks.
+        
+        Args:
+            max_wait: Maximum seconds to wait for API
+            
+        Returns:
+            True if API is ready, False if timeout
+        """
+        logger.info(f"⏳ Waiting for local API at {self.local_api_url} to be ready...")
+        
+        start_time = asyncio.get_event_loop().time()
+        attempt = 0
+        
+        while asyncio.get_event_loop().time() - start_time < max_wait:
+            attempt += 1
+            try:
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    # Try a simple health check endpoint or just connect
+                    response = await client.get(f"{self.local_api_url}/health")
+                    if response.status_code == 200:
+                        logger.info(f"✅ Local API is ready (attempt {attempt})")
+                        return True
+            except Exception as e:
+                # Also try the root endpoint as fallback
+                try:
+                    async with httpx.AsyncClient(timeout=5.0) as client:
+                        response = await client.get(f"{self.local_api_url}/")
+                        if response.status_code in (200, 404):  # 404 is fine, API is responding
+                            logger.info(f"✅ Local API is ready (attempt {attempt})")
+                            return True
+                except:
+                    pass
+            
+            elapsed = int(asyncio.get_event_loop().time() - start_time)
+            logger.info(f"⏳ Local API not ready yet (attempt {attempt}, {elapsed}s elapsed)...")
+            await asyncio.sleep(5)
+        
+        logger.error(f"❌ Local API not ready after {max_wait}s")
+        return False
+    
     async def start(self):
         """Start the worker agent."""
         logger.info(f"🚀 Starting worker agent ({self.api_type})...")
@@ -69,6 +111,12 @@ class WorkerAgent:
         
         self._running = True
         self._http_client = httpx.AsyncClient(timeout=httpx.Timeout(None, connect=30.0))
+        
+        # Wait for local API to be ready before connecting to orchestrator
+        # This prevents accepting tasks before we can process them
+        if not await self._wait_for_local_api():
+            logger.error("❌ Cannot start worker - local API not available")
+            return
         
         # Setup signal handlers
         for sig in (signal.SIGTERM, signal.SIGINT):

@@ -28,6 +28,12 @@ STATUS_CALLBACK_URL = os.getenv('STATUS_CALLBACK_URL', 'http://worker_agent:9099
 # Global dictionary to track active requests and cancellation flags
 active_requests = {}
 
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for worker agent to verify API is ready."""
+    return {"status": "healthy", "api": "crunchbase"}
+
 @app.post("/cancel/{request_id}")
 async def cancel_request(request_id: str):
     """Cancel an active scraping request."""
