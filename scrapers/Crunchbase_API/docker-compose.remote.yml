@@ -9,17 +9,14 @@ services:
     build: .
     container_name: remote-crunchbase-api
     command: sh -c "python api_handler.py"
+    ports:
+      - "8003:8003"
     volumes:
       - .:/app
     environment:
       PYTHONWARNINGS: "ignore::FutureWarning"
       PANDAS_FUTURE_NO_SILENT_DOWNCASTING: "True"
     restart: unless-stopped
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8003/health" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
   # ==========================================================================
   # Worker Agent (connects to main server orchestrator)
@@ -29,7 +26,7 @@ services:
       context: ./worker_agent
       dockerfile: Dockerfile
     container_name: remote-crunchbase-worker
-    command: python -m agent
+    command: sh -c "sleep 30 && python -m agent"
     environment:
       - ORCHESTRATOR_URL=${ORCHESTRATOR_URL:-ws://89.42.199.54:8010/ws/worker}
       - WORKER_TOKEN=${WORKER_TOKEN}
@@ -40,8 +37,7 @@ services:
       - RECONNECT_DELAY=5
       - LOG_LEVEL=INFO
     depends_on:
-      crunchbase_api:
-        condition: service_healthy
+      - crunchbase_api
     restart: unless-stopped
 
 networks:
