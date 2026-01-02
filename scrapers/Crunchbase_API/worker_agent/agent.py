@@ -1,12 +1,18 @@
 """
-Worker Agent - connects to orchestrator and executes API tasks.
+Worker Agent - Robust connection to orchestrator with task execution.
+
+Key reliability features:
+- No ping timeout during task execution (disables WebSocket keepalive during API calls)
+- Tracks task state to prevent duplicate execution
+- Graceful reconnection without task restart
+- Resilient status updates that don't crash on connection loss
 """
 import asyncio
 import logging
 import json
 import signal
 from datetime import datetime
-from typing import Optional, Dict, Any, Callable
+from typing import Optional, Dict, Any, Set
 import httpx
 import websockets
 from websockets.exceptions import ConnectionClosed
@@ -23,16 +29,13 @@ logger = logging.getLogger(__name__)
 
 class WorkerAgent:
     """
-    Worker agent that connects to the orchestrator and executes tasks.
+    Robust worker agent that connects to the orchestrator and executes tasks.
     
-    Lifecycle:
-    1. Connect to orchestrator via WebSocket
-    2. Authenticate with token
-    3. Wait for task assignment
-    4. Execute task by calling local API
-    5. Stream status updates to orchestrator
-    6. Report completion/failure
-    7. Go back to idle, repeat
+    Features:
+    - Handles long-running tasks without WebSocket timeout
+    - Tracks completed tasks to prevent re-execution on reconnect
+    - Graceful degradation when connection is lost during task
+    - Fire-and-forget status updates that don't block or crash
     """
     
     def __init__(self):
@@ -44,10 +47,19 @@ class WorkerAgent:
         self.websocket: Optional[websockets.WebSocketClientProtocol] = None
         self.worker_id: Optional[str] = None
         self.current_task_id: Optional[str] = None
+        self.current_task_data: Optional[Dict] = None
+        
+        # Track tasks we've already worked on to prevent re-execution
+        self._completed_tasks: Set[str] = set()
+        self._in_progress_task: Optional[str] = None
         
         self._running = False
         self._reconnect_attempts = 0
         self._http_client: Optional[httpx.AsyncClient] = None
+        self._connection_healthy = False
+        
+        # Pending messages to send after reconnect
+        self._pending_messages: list = []
     
     async def start(self):
         """Start the worker agent."""
@@ -56,7 +68,7 @@ class WorkerAgent:
         logger.info(f"   Local API: {self.local_api_url}")
         
         self._running = True
-        self._http_client = httpx.AsyncClient(timeout=600.0)  # 10 min timeout for API calls
+        self._http_client = httpx.AsyncClient(timeout=httpx.Timeout(None, connect=30.0))
         
         # Setup signal handlers
         for sig in (signal.SIGTERM, signal.SIGINT):
@@ -73,7 +85,10 @@ class WorkerAgent:
         self._running = False
         
         if self.websocket:
-            await self.websocket.close()
+            try:
+                await self.websocket.close()
+            except:
+                pass
         
         if self._http_client:
             await self._http_client.aclose()
@@ -107,24 +122,32 @@ class WorkerAgent:
         """Connect to orchestrator and run message loop."""
         logger.info(f"🔌 Connecting to {self.orchestrator_url}...")
         
+        # Use longer ping timeout to handle long-running tasks
+        # ping_interval=None disables automatic ping - we'll handle it manually
         async with websockets.connect(
             self.orchestrator_url,
-            ping_interval=30,
-            ping_timeout=10
+            ping_interval=None,  # Disable auto-ping
+            ping_timeout=None,   # Disable ping timeout
+            close_timeout=10
         ) as websocket:
             self.websocket = websocket
+            self._connection_healthy = True
             self._reconnect_attempts = 0
             
             # Authenticate
             if not await self._authenticate():
                 return
             
-            # Start heartbeat task
+            # Send any pending messages (e.g., task completion from before disconnect)
+            await self._flush_pending_messages()
+            
+            # Start manual heartbeat task
             heartbeat_task = asyncio.create_task(self._heartbeat_loop())
             
             try:
                 await self._message_loop()
             finally:
+                self._connection_healthy = False
                 heartbeat_task.cancel()
                 try:
                     await heartbeat_task
@@ -140,7 +163,9 @@ class WorkerAgent:
             "metadata": {
                 "name": config.WORKER_NAME,
                 "version": config.WORKER_VERSION,
-                "local_api_url": self.local_api_url
+                "local_api_url": self.local_api_url,
+                # Tell orchestrator about any task we're currently executing
+                "in_progress_task": self._in_progress_task
             }
         }
         
@@ -154,93 +179,156 @@ class WorkerAgent:
             logger.info(f"✅ Authenticated as {self.worker_id}")
             return True
         else:
-            error = data.get("error", "Unknown error")
-            logger.error(f"❌ Authentication failed: {error}")
+            logger.error(f"❌ Authentication failed: {data}")
             return False
     
+    async def _flush_pending_messages(self):
+        """Send any messages that were queued during disconnect."""
+        while self._pending_messages:
+            msg = self._pending_messages.pop(0)
+            try:
+                await self.websocket.send(json.dumps(msg))
+                logger.info(f"📤 Sent pending message: {msg.get('type')}")
+            except Exception as e:
+                logger.error(f"Failed to send pending message: {e}")
+                self._pending_messages.insert(0, msg)  # Put it back
+                break
+    
     async def _heartbeat_loop(self):
-        """Send periodic heartbeats to orchestrator."""
+        """Send periodic heartbeats when idle (not during task execution)."""
         while True:
             try:
                 await asyncio.sleep(config.HEARTBEAT_INTERVAL)
-                await self.websocket.send(json.dumps({"type": "heartbeat"}))
-                logger.debug("💓 Heartbeat sent")
+                
+                # Only send heartbeat if we're not in the middle of a task
+                # During task execution, we let the WebSocket stay open without pings
+                if self._connection_healthy and self.websocket and not self._in_progress_task:
+                    try:
+                        await self.websocket.send(json.dumps({"type": "heartbeat"}))
+                    except ConnectionClosed:
+                        logger.warning("Connection lost during heartbeat")
+                        break
+                        
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"Heartbeat error: {e}")
-                break
     
     async def _message_loop(self):
-        """Listen for messages from orchestrator."""
-        async for message in self.websocket:
+        """Main message processing loop."""
+        while self._running:
             try:
+                # Large timeout for receiving messages during task execution
+                message = await asyncio.wait_for(
+                    self.websocket.recv(),
+                    timeout=600.0  # 10 minute timeout
+                )
                 data = json.loads(message)
                 msg_type = data.get("type")
                 
-                if msg_type == "heartbeat_ack":
-                    logger.debug("💓 Heartbeat acknowledged")
-                    
-                elif msg_type == "task":
-                    # Received a task to execute
+                if msg_type == "task":
                     await self._handle_task(data)
-                    
+                elif msg_type == "heartbeat_ack":
+                    pass  # Heartbeat acknowledged
                 elif msg_type == "cancel":
-                    # Task cancellation request
-                    task_id = data.get("task_id")
-                    if task_id == self.current_task_id:
-                        logger.info(f"🚫 Task {task_id} cancelled")
-                        # TODO: Implement cancellation logic
-                        
+                    await self._handle_cancel(data)
                 else:
-                    logger.debug(f"Received: {msg_type}")
+                    logger.debug(f"Unknown message type: {msg_type}")
                     
-            except json.JSONDecodeError as e:
-                logger.error(f"Invalid JSON received: {e}")
+            except asyncio.TimeoutError:
+                # Check if connection is still alive
+                if self._in_progress_task:
+                    logger.debug("Receive timeout but task in progress, continuing...")
+                else:
+                    logger.warning("Receive timeout, checking connection...")
+                    # Try a ping to check connection
+                    try:
+                        await self.websocket.ping()
+                    except:
+                        logger.error("Connection dead, exiting message loop")
+                        break
+            except ConnectionClosed as e:
+                logger.warning(f"WebSocket connection closed: {e}")
+                break
             except Exception as e:
                 logger.error(f"Message handling error: {e}")
     
+    async def _handle_cancel(self, data: dict):
+        """Handle task cancellation request."""
+        task_id = data.get("task_id")
+        if self._in_progress_task == task_id:
+            logger.warning(f"⚠️ Task {task_id} cancellation requested (will complete current API call)")
+            # Note: We can't easily cancel the HTTP request mid-flight
+            # But we can mark it for cleanup after current call completes
+    
     async def _handle_task(self, data: dict):
-        """
-        Handle an incoming task from orchestrator.
-        """
+        """Handle an incoming task from orchestrator."""
         task_id = data.get("task_id")
         report_id = data.get("report_id")
         action = data.get("action")
         payload = data.get("payload", {})
         
+        # CRITICAL: Prevent duplicate task execution
+        if task_id in self._completed_tasks:
+            logger.warning(f"⚠️ Task {task_id} already completed, skipping duplicate")
+            return
+        
+        if self._in_progress_task == task_id:
+            logger.warning(f"⚠️ Task {task_id} already in progress, skipping")
+            return
+        
+        if self._in_progress_task is not None:
+            logger.warning(f"⚠️ Already working on {self._in_progress_task}, cannot accept {task_id}")
+            return
+        
         logger.info(f"📥 Received task: {task_id} ({action})")
         self.current_task_id = task_id
+        self._in_progress_task = task_id
+        self.current_task_data = data
         
         # Notify orchestrator we're starting
-        await self._send({
+        await self._send_safe({
             "type": "running",
             "task_id": task_id
         })
         
         try:
-            # Execute the task
+            # Execute the task (this can take a long time)
             result = await self._execute_task(action, payload, report_id, task_id)
             
-            # Report success
-            await self._send({
+            # Mark as completed BEFORE sending success message
+            self._completed_tasks.add(task_id)
+            
+            # Report success - use safe send that queues if disconnected
+            await self._send_safe({
                 "type": "complete",
                 "task_id": task_id,
                 "result": result
             })
-            logger.info(f"✅ Task {task_id} completed")
+            logger.info(f"✅ Task {task_id} completed successfully")
             
         except Exception as e:
-            # Report failure
+            # Mark as completed even on failure to prevent retry loop
+            self._completed_tasks.add(task_id)
+            
             error_msg = str(e)
             logger.error(f"❌ Task {task_id} failed: {error_msg}")
-            await self._send({
+            
+            await self._send_safe({
                 "type": "error",
                 "task_id": task_id,
                 "error": error_msg
             })
         finally:
             self.current_task_id = None
+            self._in_progress_task = None
+            self.current_task_data = None
+            
+            # Clean up old completed tasks (keep last 100)
+            if len(self._completed_tasks) > 100:
+                # Convert to list, remove oldest entries
+                task_list = list(self._completed_tasks)
+                self._completed_tasks = set(task_list[-100:])
     
     async def _execute_task(
         self, 
@@ -249,25 +337,16 @@ class WorkerAgent:
         report_id: str,
         task_id: str
     ) -> dict:
-        """
-        Execute a task by calling the local API.
-        
-        The local API is the existing Crunchbase/Tracxn scraper.
-        We wrap the call and intercept status updates.
-        """
-        # Build the API endpoint based on action
+        """Execute a task by calling the local API."""
         endpoint = self._get_endpoint(action)
         url = f"{self.local_api_url}{endpoint}"
         
         logger.info(f"📡 Calling local API: {url}")
         
-        # Add our callback URL for status updates
-        # We'll use a special header to route updates through the agent
-        # Note: The existing APIs send updates directly, but we need to intercept
-        # For now, we'll modify the payload to include our report_id
+        # Add report_id for status tracking
         modified_payload = {**payload, "report_id": report_id}
         
-        # Make the API call
+        # Make the API call with no timeout (long-running scraping)
         response = await self._http_client.post(
             url,
             json=modified_payload,
@@ -282,7 +361,6 @@ class WorkerAgent:
     
     def _get_endpoint(self, action: str) -> str:
         """Get the local API endpoint for an action."""
-        # Map action names to API endpoints
         endpoints = {
             # Crunchbase endpoints
             "search_with_rank": "/search/crunchbase/top-similar-with-rank",
@@ -299,10 +377,21 @@ class WorkerAgent:
         
         return endpoints.get(action, f"/{action}")
     
-    async def _send(self, message: dict):
-        """Send a message to the orchestrator."""
-        if self.websocket:
-            await self.websocket.send(json.dumps(message))
+    async def _send_safe(self, message: dict):
+        """
+        Send a message to orchestrator with graceful handling of disconnects.
+        If disconnected, queue the message to send after reconnect.
+        """
+        if self._connection_healthy and self.websocket:
+            try:
+                await self.websocket.send(json.dumps(message))
+                return
+            except Exception as e:
+                logger.warning(f"Failed to send message, queueing: {e}")
+        
+        # Queue for later
+        self._pending_messages.append(message)
+        logger.info(f"📦 Queued message for later: {message.get('type')}")
     
     async def send_status(
         self,
@@ -312,21 +401,29 @@ class WorkerAgent:
         data: dict = None
     ):
         """
-        Send a status update to orchestrator.
+        Send a status update to orchestrator (fire-and-forget).
         
-        This can be called during task execution to report progress.
+        This is designed to NEVER crash or block, even if connection is lost.
         """
         if not self.current_task_id:
             return
         
-        await self._send({
+        status_msg = {
             "type": "status",
             "task_id": self.current_task_id,
             "step_key": step_key,
             "detail_type": detail_type,
             "message": message,
             "data": data or {}
-        })
+        }
+        
+        # Try to send, but don't crash or block if it fails
+        if self._connection_healthy and self.websocket:
+            try:
+                await self.websocket.send(json.dumps(status_msg))
+            except Exception as e:
+                logger.debug(f"Status update failed (non-critical): {e}")
+        # Don't queue status updates - they're not critical
 
 
 class StatusProxyServer:
@@ -346,7 +443,7 @@ class StatusProxyServer:
         
         app = web.Application()
         app.router.add_post('/status', self.handle_status)
-        app.router.add_post('/api/reports/status-update/', self.handle_status)  # Compatibility endpoint
+        app.router.add_post('/api/reports/status-update/', self.handle_status)
         app.router.add_get('/health', self.handle_health)
         
         runner = web.AppRunner(app)
@@ -359,7 +456,11 @@ class StatusProxyServer:
     
     async def handle_health(self, request):
         from aiohttp import web
-        return web.json_response({"status": "ok"})
+        return web.json_response({
+            "status": "ok",
+            "connected": self.agent._connection_healthy,
+            "current_task": self.agent.current_task_id
+        })
     
     async def handle_status(self, request):
         """Handle incoming status update from local API."""
@@ -368,16 +469,15 @@ class StatusProxyServer:
         try:
             data = await request.json()
             
-            # Extract status info
             step_key = data.get('step_key', 'unknown')
             detail_type = data.get('detail_type', 'status')
             message = data.get('message', '')
             status_data = data.get('data', {})
             
-            # Send via WebSocket (fire and forget)
+            # Fire and forget - create task but don't await
             if self.agent.current_task_id:
                 asyncio.create_task(
-                    self.agent.send_status(step_key, detail_type, message, status_data)
+                    self._send_status_safe(step_key, detail_type, message, status_data)
                 )
             
             return web.json_response({"success": True})
@@ -385,6 +485,13 @@ class StatusProxyServer:
         except Exception as e:
             logger.error(f"Status proxy error: {e}")
             return web.json_response({"error": str(e)}, status=500)
+    
+    async def _send_status_safe(self, step_key: str, detail_type: str, message: str, data: dict):
+        """Safely send status, catching all errors."""
+        try:
+            await self.agent.send_status(step_key, detail_type, message, data)
+        except Exception as e:
+            logger.debug(f"Status relay failed (non-critical): {e}")
 
 
 async def main():
@@ -401,4 +508,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
