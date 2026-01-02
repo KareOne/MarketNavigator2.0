@@ -105,3 +105,90 @@ class OrchestratorWorkerStatsView(APIView):
                 {"error": "Failed to connect to orchestrator", "details": str(e)},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
+
+
+class OrchestratorTestTaskView(APIView):
+    """
+    Submit a test task to a worker via orchestrator.
+    Used by admin dashboard to test worker endpoints.
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        """
+        Submit a test task.
+        
+        Request body:
+        {
+            "api_type": "crunchbase",
+            "action": "health",
+            "payload": {}
+        }
+        """
+        api_type = request.data.get('api_type', 'crunchbase')
+        action = request.data.get('action', 'health')
+        payload = request.data.get('payload', {})
+        
+        # Generate a test report ID
+        import uuid
+        test_report_id = f"test-{uuid.uuid4()}"
+        
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                response = client.post(
+                    f"{ORCHESTRATOR_URL}/tasks/submit",
+                    json={
+                        "api_type": api_type,
+                        "action": action,
+                        "report_id": test_report_id,
+                        "payload": payload,
+                        "priority": 10  # High priority for tests
+                    }
+                )
+                
+                if response.status_code == 200:
+                    task_data = response.json()
+                    task_id = task_data.get("task_id")
+                    
+                    # Wait for task completion (max 30 seconds for tests)
+                    import time
+                    for _ in range(15):  # 15 * 2s = 30s max
+                        time.sleep(2)
+                        status_response = client.get(f"{ORCHESTRATOR_URL}/tasks/{task_id}")
+                        if status_response.status_code == 200:
+                            status_data = status_response.json()
+                            task_status = status_data.get("status")
+                            
+                            if task_status == "completed":
+                                return Response({
+                                    "success": True,
+                                    "task_id": task_id,
+                                    "status": "completed",
+                                    "result": status_data.get("result")
+                                })
+                            elif task_status in ("failed", "cancelled"):
+                                return Response({
+                                    "success": False,
+                                    "task_id": task_id,
+                                    "status": task_status,
+                                    "error": status_data.get("error")
+                                }, status=status.HTTP_400_BAD_REQUEST)
+                    
+                    # Timeout
+                    return Response({
+                        "success": False,
+                        "task_id": task_id,
+                        "status": "timeout",
+                        "error": "Task did not complete within 30 seconds"
+                    }, status=status.HTTP_408_REQUEST_TIMEOUT)
+                else:
+                    return Response(
+                        {"error": "Failed to submit task", "details": response.text},
+                        status=status.HTTP_502_BAD_GATEWAY
+                    )
+        except Exception as e:
+            logger.error(f"Failed to submit test task: {e}")
+            return Response(
+                {"error": "Failed to connect to orchestrator", "details": str(e)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
