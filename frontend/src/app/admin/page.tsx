@@ -7,6 +7,9 @@ import TopBar from "@/components/TopBar";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+// Admin emails that can access this page
+const ADMIN_EMAILS = ["thehamidrezamafi@gmail.com"];
+
 interface Worker {
     worker_id: string;
     api_type: string;
@@ -41,7 +44,7 @@ interface OrchestratorHealth {
 }
 
 export default function AdminPage() {
-    const { token, isLoading, isAuthenticated } = useAuth();
+    const { user, token, isLoading, isAuthenticated } = useAuth();
     const router = useRouter();
 
     const [health, setHealth] = useState<OrchestratorHealth | null>(null);
@@ -51,6 +54,9 @@ export default function AdminPage() {
     const [isLoadingData, setIsLoadingData] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
+    // Check if current user is admin
+    const isAdmin = user?.email && ADMIN_EMAILS.includes(user.email);
 
     const fetchOrchestratorData = useCallback(async () => {
         try {
@@ -100,16 +106,23 @@ export default function AdminPage() {
         }
     }, [isLoading, isAuthenticated, router]);
 
+    // Redirect non-admin users
     useEffect(() => {
-        if (token) {
+        if (!isLoading && isAuthenticated && !isAdmin) {
+            router.push("/dashboard");
+        }
+    }, [isLoading, isAuthenticated, isAdmin, router]);
+
+    useEffect(() => {
+        if (token && isAdmin) {
             fetchOrchestratorData();
             // Refresh every 5 seconds
             const interval = setInterval(fetchOrchestratorData, 5000);
             return () => clearInterval(interval);
         }
-    }, [token, fetchOrchestratorData]);
+    }, [token, isAdmin, fetchOrchestratorData]);
 
-    if (isLoading || !isAuthenticated) {
+    if (isLoading || !isAuthenticated || !isAdmin) {
         return (
             <div className="loading" style={{ height: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
                 <div className="spinner"></div>
