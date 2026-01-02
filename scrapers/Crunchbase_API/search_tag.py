@@ -365,7 +365,7 @@ async def _collect_companies_with_rank_impl(search_hashtag, num_companies=5, use
         # Use the search helper (supports both standard and AI search)
         await _perform_search(page, search_hashtag, use_ai_search)
 
-         await page.wait_for_selector('grid-row', timeout=60000)
+        await page.wait_for_selector('grid-row', timeout=60000)
         await asyncio.sleep(random.uniform(SLEEP_DELAY, 2 * SLEEP_DELAY))
 
         # Track consecutive pages without finding companies to prevent infinite loops
