@@ -11,7 +11,7 @@ import httpx
 import websockets
 from websockets.exceptions import ConnectionClosed
 
-from . import config
+import config
 
 # Configure logging
 logging.basicConfig(
