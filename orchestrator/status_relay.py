@@ -6,8 +6,8 @@ import logging
 from typing import List
 import httpx
 
-from .models import StatusUpdate
-from . import config
+from models import StatusUpdate
+import config
 
 logger = logging.getLogger(__name__)
 

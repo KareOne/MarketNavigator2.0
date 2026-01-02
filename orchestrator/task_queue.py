@@ -9,9 +9,9 @@ from typing import Dict, List, Optional, Tuple
 import json
 import uuid
 
-from .models import Task, TaskSubmitRequest
-from .registry import WorkerRegistry
-from . import config
+from models import Task, TaskSubmitRequest
+from registry import WorkerRegistry
+import config
 
 logger = logging.getLogger(__name__)
 

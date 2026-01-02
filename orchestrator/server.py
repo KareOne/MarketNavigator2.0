@@ -13,15 +13,15 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Quer
 from fastapi.middleware.cors import CORSMiddleware
 import redis.asyncio as redis
 
-from . import config
-from .models import (
+import config
+from models import (
     Task, TaskSubmitRequest, TaskResponse, 
     Worker, WorkerStats, WorkerListResponse, QueueStatsResponse,
     StatusUpdate, WSAuthMessage, WSStatusMessage, WSCompleteMessage, WSErrorMessage
 )
-from .registry import WorkerRegistry
-from .task_queue import TaskQueue
-from .status_relay import StatusRelay
+from registry import WorkerRegistry
+from task_queue import TaskQueue
+from status_relay import StatusRelay
 
 # Configure logging
 logging.basicConfig(

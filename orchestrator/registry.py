@@ -10,8 +10,8 @@ import json
 
 from fastapi import WebSocket
 
-from .models import Worker, WorkerStats
-from . import config
+from models import Worker, WorkerStats
+import config
 
 logger = logging.getLogger(__name__)
 
