@@ -329,11 +329,76 @@ class WorkerAgent:
         })
 
 
+class StatusProxyServer:
+    """
+    Local HTTP server that receives status updates from local API
+    and relays them via the worker agent's WebSocket connection.
+    """
+    
+    def __init__(self, agent: WorkerAgent, port: int = 9099):
+        self.agent = agent
+        self.port = port
+        self._server = None
+    
+    async def start(self):
+        """Start the status proxy server."""
+        from aiohttp import web
+        
+        app = web.Application()
+        app.router.add_post('/status', self.handle_status)
+        app.router.add_post('/api/reports/status-update/', self.handle_status)  # Compatibility endpoint
+        app.router.add_get('/health', self.handle_health)
+        
+        runner = web.AppRunner(app)
+        await runner.setup()
+        
+        self._server = web.TCPSite(runner, '0.0.0.0', self.port)
+        await self._server.start()
+        
+        logger.info(f"📡 Status proxy server started on port {self.port}")
+    
+    async def handle_health(self, request):
+        from aiohttp import web
+        return web.json_response({"status": "ok"})
+    
+    async def handle_status(self, request):
+        """Handle incoming status update from local API."""
+        from aiohttp import web
+        
+        try:
+            data = await request.json()
+            
+            # Extract status info
+            step_key = data.get('step_key', 'unknown')
+            detail_type = data.get('detail_type', 'status')
+            message = data.get('message', '')
+            status_data = data.get('data', {})
+            
+            # Send via WebSocket (fire and forget)
+            if self.agent.current_task_id:
+                asyncio.create_task(
+                    self.agent.send_status(step_key, detail_type, message, status_data)
+                )
+            
+            return web.json_response({"success": True})
+            
+        except Exception as e:
+            logger.error(f"Status proxy error: {e}")
+            return web.json_response({"error": str(e)}, status=500)
+
+
 async def main():
     """Entry point for worker agent."""
     agent = WorkerAgent()
+    
+    # Start status proxy server
+    status_proxy = StatusProxyServer(agent, port=9099)
+    await status_proxy.start()
+    
+    # Start the agent
     await agent.start()
 
 
 if __name__ == "__main__":
     asyncio.run(main())
+

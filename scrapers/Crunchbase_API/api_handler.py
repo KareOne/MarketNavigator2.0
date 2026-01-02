@@ -20,6 +20,11 @@ except ImportError:
 
 app = FastAPI()
 
+# Status callback URL for progress updates
+# In local deployment, calls backend directly
+# In remote deployment with worker agent, calls the worker agent's status proxy
+STATUS_CALLBACK_URL = os.getenv('STATUS_CALLBACK_URL', 'http://worker_agent:9099')
+
 # Global dictionary to track active requests and cancellation flags
 active_requests = {}
 
@@ -708,7 +713,7 @@ async def search_top_similar_companies_with_rank(
                     "data": data or {}
                 }
                 response = await client.post(
-                    "http://backend:8000/api/reports/status-update/",
+                    f"{STATUS_CALLBACK_URL}/api/reports/status-update/",
                     json=payload,
                     headers={"Content-Type": "application/json"}
                 )
