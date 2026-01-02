@@ -240,6 +240,11 @@ def generate_crunchbase_report(self, report_id, user_id):
             loop.close()
         
         # ===== Step 3: Sorting =====
+        # NOTE: If orchestrator was used, the remote worker already sent sorting/ranking updates
+        # via real-time status callbacks. We still need to start/complete the step locally
+        # but skip the detailed progress to avoid duplicates shown after-the-fact.
+        used_orchestrator = metadata.get('used_orchestrator', False)
+        
         tracker.start_step('sorting')
         
         # Show top company names being analyzed
@@ -272,25 +277,27 @@ def generate_crunchbase_report(self, report_id, user_id):
         # Get final company names
         final_company_names = [c.get('name', 'Unknown') for c in companies_for_analysis if c.get('name')]
         
-        # Add sorted top companies as step details with CB rank and description
-        sorted_top_companies = result.get('metadata', {}).get('sorted_top_companies', [])
-        if sorted_top_companies:
-            for idx, comp in enumerate(sorted_top_companies, 1):
-                name = comp.get('name', 'Unknown')
-                cb_rank = comp.get('cb_rank', 'N/A')
-                description = comp.get('description', '')  # Full description, no truncation
-                
-                tracker.add_step_detail(
-                    'sorting',
-                    'company_rank',
-                    f"{idx}. {name} (CB Rank: {cb_rank})",  # No # prefix, use period after number
-                    {
-                        'rank': idx,
-                        'name': name,
-                        'cb_rank': cb_rank,
-                        'description': description
-                    }
-                )
+        # Only add detailed company ranks if NOT using orchestrator (to avoid duplicates)
+        # Remote worker already sent these via real-time callbacks
+        if not used_orchestrator:
+            sorted_top_companies = result.get('metadata', {}).get('sorted_top_companies', [])
+            if sorted_top_companies:
+                for idx, comp in enumerate(sorted_top_companies, 1):
+                    name = comp.get('name', 'Unknown')
+                    cb_rank = comp.get('cb_rank', 'N/A')
+                    description = comp.get('description', '')  # Full description, no truncation
+                    
+                    tracker.add_step_detail(
+                        'sorting',
+                        'company_rank',
+                        f"{idx}. {name} (CB Rank: {cb_rank})",  # No # prefix, use period after number
+                        {
+                            'rank': idx,
+                            'name': name,
+                            'cb_rank': cb_rank,
+                            'description': description
+                        }
+                    )
         
         tracker.complete_step('sorting', {
             'companies_sorted': len(companies_for_analysis),
@@ -301,13 +308,14 @@ def generate_crunchbase_report(self, report_id, user_id):
             raise Exception("No companies found for analysis")
         
         # ===== Step 4: Fetching Company Details =====
-        # Note: Real-time per-company updates now come from crunchbase_api via HTTP callbacks
+        # Note: If orchestrator was used, real-time per-company updates already came from remote worker
         tracker.start_step('fetching_details')
-        tracker.update_step_message(
-            'fetching_details',
-            f"Processing {len(companies_for_analysis)} companies...",
-            progress_percent=50
-        )
+        if not used_orchestrator:
+            tracker.update_step_message(
+                'fetching_details',
+                f"Processing {len(companies_for_analysis)} companies...",
+                progress_percent=50
+            )
         
         # The scraping already happened during API search - this step just confirms completion
         tracker.complete_step('fetching_details', {

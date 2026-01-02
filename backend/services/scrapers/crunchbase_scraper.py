@@ -161,6 +161,10 @@ class CrunchbaseScraperClient(RetryableScraperClient):
                     report_id=report_id or "direct-search",
                     # Use default 3-hour timeout - long tasks like scraping can take a while
                 )
+                # Mark that orchestrator was used - Celery task will skip duplicate progress updates
+                if 'metadata' not in result:
+                    result['metadata'] = {}
+                result['metadata']['used_orchestrator'] = True
                 logger.info(
                     f"Crunchbase (orchestrator) returned: "
                     f"{result.get('metadata', {}).get('all_companies_count', 0)} total, "
