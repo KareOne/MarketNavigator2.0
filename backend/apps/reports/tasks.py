@@ -294,11 +294,13 @@ def generate_crunchbase_report(self, report_id, user_id):
                 sorting_step = ReportProgressStep.objects.filter(report=report, step_key='sorting').first()
                 if sorting_step and sorting_step.details:
                     existing_company_ranks = sum(1 for d in sorting_step.details if d.get('type') == 'company_rank')
-            except Exception:
-                pass
+                logger.info(f"🔍 Deduplication check: {existing_company_ranks} existing company_rank entries, {len(sorted_top_companies)} from result")
+            except Exception as e:
+                logger.warning(f"⚠️ Error checking existing company_ranks: {e}")
             
-            # Only add if real-time updates didn't already provide them
+            # Add all companies if none exist, or skip if already have enough
             if existing_company_ranks < len(sorted_top_companies):
+                logger.info(f"📝 Adding {len(sorted_top_companies)} company_rank entries (existing: {existing_company_ranks})")
                 for idx, comp in enumerate(sorted_top_companies, 1):
                     name = comp.get('name', 'Unknown')
                     cb_rank = comp.get('cb_rank', 'N/A')
@@ -315,6 +317,8 @@ def generate_crunchbase_report(self, report_id, user_id):
                             'description': description
                         }
                     )
+            else:
+                logger.info(f"⏭️ Skipping company_rank entries - already have {existing_company_ranks}")
         
         tracker.complete_step('sorting', {
             'companies_sorted': len(companies_for_analysis),

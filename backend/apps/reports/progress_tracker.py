@@ -278,7 +278,11 @@ class ReportProgressTracker:
             if metadata:
                 step.metadata = metadata
             step.calculate_duration()
-            step.save()
+            # Use update_fields to avoid overwriting 'details' added by real-time updates
+            update_fields = ['status', 'completed_at', 'progress_percent', 'duration_seconds', 'updated_at']
+            if metadata:
+                update_fields.append('metadata')
+            step.save(update_fields=update_fields)
             
             # Record timing for future predictions
             if step.duration_seconds and step.duration_seconds > 0:
@@ -320,7 +324,8 @@ class ReportProgressTracker:
             step.completed_at = timezone.now()
             step.error_message = error_message
             step.calculate_duration()
-            step.save()
+            # Use update_fields to avoid overwriting 'details' added by real-time updates
+            step.save(update_fields=['status', 'completed_at', 'error_message', 'duration_seconds', 'updated_at'])
             
             logger.error(f"❌ Failed step: {step.step_name} - {error_message}")
             self._broadcast_update()
@@ -349,7 +354,11 @@ class ReportProgressTracker:
             step.progress_percent = 100
             if reason:
                 step.metadata = {'skip_reason': reason}
-            step.save()
+            # Use update_fields to avoid overwriting 'details' added by real-time updates
+            update_fields = ['status', 'completed_at', 'progress_percent', 'updated_at']
+            if reason:
+                update_fields.append('metadata')
+            step.save(update_fields=update_fields)
             
             logger.info(f"⏭️ Skipped step: {step.step_name}")
             self._broadcast_update()
