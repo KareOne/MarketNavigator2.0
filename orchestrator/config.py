@@ -42,7 +42,7 @@ WORKER_TOKENS: Dict[str, List[str]] = _load_tokens()
 
 # Worker health settings
 WORKER_HEARTBEAT_INTERVAL = int(os.getenv("WORKER_HEARTBEAT_INTERVAL", "10"))  # seconds
-WORKER_TIMEOUT = int(os.getenv("WORKER_TIMEOUT", "30"))  # seconds before marking offline
+WORKER_TIMEOUT = int(os.getenv("WORKER_TIMEOUT", "60"))  # seconds before marking offline
 
 # Task settings
 # TASK_TIMEOUT is the expected max duration for a task. Redis TTL is 2x this value.

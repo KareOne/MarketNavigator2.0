@@ -243,16 +243,16 @@ class WorkerAgent:
                 break
     
     async def _heartbeat_loop(self):
-        """Send periodic heartbeats when idle (not during task execution)."""
+        """Send periodic heartbeats to keep connection alive."""
         while True:
             try:
                 await asyncio.sleep(config.HEARTBEAT_INTERVAL)
                 
-                # Only send heartbeat if we're not in the middle of a task
-                # During task execution, we let the WebSocket stay open without pings
-                if self._connection_healthy and self.websocket and not self._in_progress_task:
+                # Always send heartbeat to prevent timeout, even during task execution
+                if self._connection_healthy and self.websocket:
                     try:
                         await self.websocket.send(json.dumps({"type": "heartbeat"}))
+                        logger.debug("💓 Heartbeat sent")
                     except ConnectionClosed:
                         logger.warning("Connection lost during heartbeat")
                         break
@@ -277,7 +277,12 @@ class WorkerAgent:
                 if msg_type == "task":
                     await self._handle_task(data)
                 elif msg_type == "heartbeat_ack":
-                    pass  # Heartbeat acknowledged
+                    # Log status confirmation from orchestrator
+                    status = data.get("status", "unknown")
+                    worker_id = data.get("worker_id", "?")
+                    current_task = data.get("current_task")
+                    task_info = f", task: {current_task}" if current_task else ""
+                    logger.info(f"✅ Orchestrator confirms: {worker_id} → {status}{task_info}")
                 elif msg_type == "cancel":
                     await self._handle_cancel(data)
                 else:

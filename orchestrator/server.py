@@ -308,7 +308,14 @@ async def worker_websocket(websocket: WebSocket):
             
             if msg_type == "heartbeat":
                 await registry.update_heartbeat(worker_id)
-                await websocket.send_json({"type": "heartbeat_ack"})
+                # Send acknowledgement with worker status so worker can confirm it's recognized
+                worker = registry.get_worker(worker_id)
+                await websocket.send_json({
+                    "type": "heartbeat_ack",
+                    "worker_id": worker_id,
+                    "status": worker.status if worker else "unknown",
+                    "current_task": worker.current_task_id if worker else None
+                })
                 
             elif msg_type == "status":
                 # Worker sending status update during task execution
