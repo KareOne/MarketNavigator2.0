@@ -912,14 +912,6 @@ async def search_top_similar_companies_with_rank(
             
             print(f"✅ Similarity ranking completed in {similarity_time:.2f}s")
             
-            # Send status: Companies ranked
-            send_status_update(
-                "sorting",
-                "top_companies",
-                f"Top {top_count} companies selected",
-                {"total_companies": len(similar_companies)}
-            )
-            
             # Calculate rank scores and combined scores
             all_companies_with_scores = []
             for similar_comp in similar_companies:
@@ -956,6 +948,37 @@ async def search_top_similar_companies_with_rank(
             # Add ranks
             for i, company in enumerate(all_companies_with_scores):
                 company["combined_rank"] = i + 1
+            
+            # Send status: Top companies ranked
+            send_status_update(
+                "sorting",
+                "top_companies",
+                f"Top {top_count} companies selected",
+                {"total_companies": len(all_companies_with_scores)}
+            )
+            
+            # Send individual company rankings for real-time display
+            # These are persisted via StatusUpdateView → add_step_detail → database
+            # tasks.py has deduplication check to skip if these already exist
+            for i, comp in enumerate(all_companies_with_scores[:top_count]):
+                # Extract clean company name from URL
+                name = comp["url"].split("/")[-1].replace("-", " ").title()
+                cb_rank = comp.get("cb_rank", "N/A")
+                description = comp.get("description", "")
+                
+                send_status_update(
+                    "sorting",
+                    "company_rank",
+                    f"{i+1}. {name} (CB Rank: {cb_rank})",
+                    {
+                        "rank": i + 1,
+                        "name": name,
+                        "cb_rank": cb_rank,
+                        "description": description,
+                        "similarity_score": comp.get("similarity_score"),
+                        "combined_score": comp.get("combined_score")
+                    }
+                )
             
             # Get top N URLs to scrape for full data (based on combined score)
             top_urls_to_scrape = [comp["url"] for comp in all_companies_with_scores[:top_count]]

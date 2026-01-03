@@ -283,11 +283,22 @@ def generate_crunchbase_report(self, report_id, user_id):
         # Get final company names
         final_company_names = [c.get('name', 'Unknown') for c in companies_for_analysis if c.get('name')]
         
-        # Only add detailed company ranks if NOT using orchestrator (to avoid duplicates)
-        # Remote worker already sent these via real-time callbacks
-        if not used_orchestrator:
-            sorted_top_companies = result.get('metadata', {}).get('sorted_top_companies', [])
-            if sorted_top_companies:
+        # Add detailed company ranks from sorted_top_companies metadata
+        # Check if real-time updates already added these (from remote worker via StatusUpdateView)
+        sorted_top_companies = result.get('metadata', {}).get('sorted_top_companies', [])
+        if sorted_top_companies:
+            # Check existing company_rank details to avoid duplicates
+            from .models import ReportProgressStep
+            existing_company_ranks = 0
+            try:
+                sorting_step = ReportProgressStep.objects.filter(report=report, step_key='sorting').first()
+                if sorting_step and sorting_step.details:
+                    existing_company_ranks = sum(1 for d in sorting_step.details if d.get('type') == 'company_rank')
+            except Exception:
+                pass
+            
+            # Only add if real-time updates didn't already provide them
+            if existing_company_ranks < len(sorted_top_companies):
                 for idx, comp in enumerate(sorted_top_companies, 1):
                     name = comp.get('name', 'Unknown')
                     cb_rank = comp.get('cb_rank', 'N/A')
