@@ -320,75 +320,78 @@ async def worker_websocket(websocket: WebSocket):
         try:
             # Main message loop
             while True:
-            message = await websocket.receive_json()
-            msg_type = message.get("type")
-            
-            if msg_type == "heartbeat":
-                await registry.update_heartbeat(worker_id)
-                # Send acknowledgement with worker status so worker can confirm it's recognized
-                worker = registry.get_worker(worker_id)
-                await websocket.send_json({
-                    "type": "heartbeat_ack",
-                    "worker_id": worker_id,
-                    "status": worker.status if worker else "unknown",
-                    "current_task": worker.current_task_id if worker else None
-                })
+                message = await websocket.receive_json()
+                msg_type = message.get("type")
                 
-            elif msg_type == "status":
-                # Worker sending status update during task execution
-                task_id = message.get("task_id")
-                task = await task_queue.get_task(task_id)
+                if msg_type == "heartbeat":
+                    await registry.update_heartbeat(worker_id)
+                    # Send acknowledgement with worker status so worker can confirm it's recognized
+                    worker = registry.get_worker(worker_id)
+                    await websocket.send_json({
+                        "type": "heartbeat_ack",
+                        "worker_id": worker_id,
+                        "status": worker.status if worker else "unknown",
+                        "current_task": worker.current_task_id if worker else None
+                    })
                 
-                if task:
-                    # Forward to backend via status relay
-                    update = StatusUpdate(
-                        task_id=task_id,
-                        report_id=task.report_id,
-                        step_key=message.get("step_key", ""),
-                        detail_type=message.get("detail_type", "status"),
-                        message=message.get("message", ""),
-                        data=message.get("data", {})
-                    )
-                    await status_relay.relay(update)
+                elif msg_type == "pong":
+                    # Response to server ping - connection alive
+                    logger.debug(f"📡 Received pong from {worker_id}")
                     
-            elif msg_type == "running":
-                # Worker started executing task
-                task_id = message.get("task_id")
-                await task_queue.mark_running(task_id)
-                
-            elif msg_type == "complete":
-                # Worker completed task
-                task_id = message.get("task_id")
-                result = message.get("result", {})
-                await task_queue.mark_completed(task_id, result)
-                
-                # Signal for next task
-                task_queue._assignment_event.set()
-                
-            elif msg_type == "error":
-                # Worker encountered error
-                task_id = message.get("task_id")
-                error = message.get("error", "Unknown error")
-                if task_id:
-                    await task_queue.mark_failed(task_id, error)
-                logger.error(f"Worker {worker_id} error: {error}")
-                
-            else:
-                logger.warning(f"Unknown message type from {worker_id}: {msg_type}")
+                elif msg_type == "status":
+                    # Worker sending status update during task execution
+                    task_id = message.get("task_id")
+                    task = await task_queue.get_task(task_id)
+                    
+                    if task:
+                        # Forward to backend via status relay
+                        update = StatusUpdate(
+                            task_id=task_id,
+                            report_id=task.report_id,
+                            step_key=message.get("step_key", ""),
+                            detail_type=message.get("detail_type", "status"),
+                            message=message.get("message", ""),
+                            data=message.get("data", {})
+                        )
+                        await status_relay.relay(update)
+                        
+                elif msg_type == "running":
+                    # Worker started executing task
+                    task_id = message.get("task_id")
+                    await task_queue.mark_running(task_id)
+                    
+                elif msg_type == "complete":
+                    # Worker completed task
+                    task_id = message.get("task_id")
+                    result = message.get("result", {})
+                    await task_queue.mark_completed(task_id, result)
+                    
+                    # Signal for next task
+                    task_queue._assignment_event.set()
+                    
+                elif msg_type == "error":
+                    # Worker encountered error
+                    task_id = message.get("task_id")
+                    error = message.get("error", "Unknown error")
+                    if task_id:
+                        await task_queue.mark_failed(task_id, error)
+                    logger.error(f"Worker {worker_id} error: {error}")
+                    
+                else:
+                    logger.warning(f"Unknown message type from {worker_id}: {msg_type}")
+        finally:
+            # Cancel ping task when message loop exits
+            ping_task.cancel()
+            try:
+                await ping_task
+            except asyncio.CancelledError:
+                pass
                 
     except WebSocketDisconnect:
         logger.info(f"🔌 Worker {worker_id} disconnected")
     except Exception as e:
         logger.error(f"WebSocket error for {worker_id}: {e}")
     finally:
-        # Cancel ping task
-        if 'ping_task' in dir():
-            ping_task.cancel()
-            try:
-                await ping_task
-            except asyncio.CancelledError:
-                pass
-        
         # Cleanup worker registration
         if authenticated:
             # Check if worker had an active task
