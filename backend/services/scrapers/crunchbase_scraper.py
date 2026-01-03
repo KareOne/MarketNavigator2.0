@@ -46,7 +46,12 @@ class CrunchbaseScraperClient(RetryableScraperClient):
         self.orchestrator_url = getattr(settings, 'ORCHESTRATOR_URL', 'http://orchestrator:8010')
     
     async def _check_orchestrator_available(self) -> bool:
-        """Check if orchestrator has any connected workers (tasks will queue if busy)."""
+        """
+        Check if orchestrator is enabled and reachable.
+        
+        Note: We always use orchestrator when enabled (no local API fallback).
+        Tasks will queue and wait for workers if none are immediately available.
+        """
         if not self.use_orchestrator:
             logger.debug("Orchestrator disabled in settings")
             return False
@@ -58,14 +63,19 @@ class CrunchbaseScraperClient(RetryableScraperClient):
                     data = response.json()
                     total_workers = data.get('total', 0)
                     idle_workers = data.get('idle', 0)
-                    logger.info(f"🔍 Orchestrator check: {total_workers} total workers, {idle_workers} idle")
-                    # Use orchestrator if ANY workers are connected (tasks will queue)
-                    return total_workers > 0
+                    logger.info(f"🔍 Orchestrator: {total_workers} workers ({idle_workers} idle)")
+                    
+                    if total_workers == 0:
+                        logger.warning("⚠️ No workers connected - task will queue until worker connects")
+                    
+                    # Always use orchestrator if it's reachable (tasks will queue)
+                    return True
                 else:
                     logger.warning(f"Orchestrator stats failed: {response.status_code}")
+                    return False
         except Exception as e:
-            logger.warning(f"Orchestrator check failed: {e}")
-        return False
+            logger.error(f"❌ Orchestrator unreachable: {e}")
+            return False
     
     async def _submit_to_orchestrator(
         self,
@@ -150,53 +160,35 @@ class CrunchbaseScraperClient(RetryableScraperClient):
         if report_id:
             request_data["report_id"] = report_id
         
-        # Try orchestrator if enabled and workers available
+        # Use orchestrator (required - no local API fallback)
         orchestrator_available = await self._check_orchestrator_available()
-        if orchestrator_available:
-            try:
-                logger.info("🔄 Using orchestrator for Crunchbase search (remote worker)")
-                result = await self._submit_to_orchestrator(
-                    action="search_with_rank",
-                    payload=request_data,
-                    report_id=report_id or "direct-search",
-                    # Use default 3-hour timeout - long tasks like scraping can take a while
-                )
-                # Mark that orchestrator was used - Celery task will skip duplicate progress updates
-                if 'metadata' not in result:
-                    result['metadata'] = {}
-                result['metadata']['used_orchestrator'] = True
-                logger.info(
-                    f"Crunchbase (orchestrator) returned: "
-                    f"{result.get('metadata', {}).get('all_companies_count', 0)} total, "
-                    f"{result.get('metadata', {}).get('top_count_returned', 0)} top companies"
-                )
-                return result
-            except Exception as e:
-                # If orchestrator has workers but failed, don't fall back to direct API
-                # (there's no local crunchbase_api container anyway)
-                logger.error(f"Orchestrator task failed: {e}")
-                raise ExternalAPIError(f"Crunchbase scraper (orchestrator) failed: {e}")
-        
-        # Fallback to direct API call
-        try:
-            logger.info("📡 Using direct API for Crunchbase search (local container)")
-            result = await self.request_with_retry(
-                'POST',
-                '/search/crunchbase/top-similar-with-rank',
-                data=request_data,
-                use_cache=True,
+        if not orchestrator_available:
+            raise ExternalAPIError(
+                "Crunchbase scraper unavailable: Orchestrator not reachable. "
+                "Please ensure the orchestrator service is running and USE_ORCHESTRATOR=True in settings."
             )
-            
+        
+        try:
+            logger.info("🔄 Submitting Crunchbase search to orchestrator queue")
+            result = await self._submit_to_orchestrator(
+                action="search_with_rank",
+                payload=request_data,
+                report_id=report_id or "direct-search",
+                # Use default 3-hour timeout - long tasks like scraping can take a while
+            )
+            # Mark that orchestrator was used - Celery task will skip duplicate progress updates
+            if 'metadata' not in result:
+                result['metadata'] = {}
+            result['metadata']['used_orchestrator'] = True
             logger.info(
-                f"Crunchbase returned: {result.get('metadata', {}).get('all_companies_count', 0)} total, "
+                f"Crunchbase (orchestrator) returned: "
+                f"{result.get('metadata', {}).get('all_companies_count', 0)} total, "
                 f"{result.get('metadata', {}).get('top_count_returned', 0)} top companies"
             )
-            
             return result
-            
         except Exception as e:
-            logger.error(f"Crunchbase search failed: {e}")
-            raise
+            logger.error(f"Orchestrator task failed: {e}")
+            raise ExternalAPIError(f"Crunchbase scraper failed: {e}")
     
     async def search_batch(
         self,
