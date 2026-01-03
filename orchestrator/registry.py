@@ -210,14 +210,29 @@ class WorkerRegistry:
                 await asyncio.sleep(config.WORKER_HEARTBEAT_INTERVAL)
                 
                 now = datetime.utcnow()
-                timeout = timedelta(seconds=config.WORKER_TIMEOUT)
+                idle_timeout = timedelta(seconds=config.WORKER_TIMEOUT)
+                # Give working workers much more time - tasks can run 3+ hours
+                working_timeout = timedelta(seconds=config.WORKER_TIMEOUT * 50)  # ~4 hours with 5 min base
                 
                 for worker_id, worker in list(self.workers.items()):
-                    if now - worker.last_heartbeat > timeout:
-                        logger.warning(f"⚠️ Worker {worker_id} timed out, marking offline")
-                        await self.unregister(worker_id)
+                    time_since_heartbeat = now - worker.last_heartbeat
+                    
+                    # Use different timeouts based on worker status
+                    if worker.status == "working" or worker.current_task_id:
+                        # Worker is executing a task - use long timeout
+                        if time_since_heartbeat > working_timeout:
+                            logger.warning(f"⚠️ Working worker {worker_id} timed out after {time_since_heartbeat.seconds}s, marking offline")
+                            await self.unregister(worker_id)
+                        elif time_since_heartbeat > idle_timeout:
+                            logger.debug(f"Worker {worker_id} heartbeat delayed ({time_since_heartbeat.seconds}s) but working on task, keeping alive")
+                    else:
+                        # Idle worker - use normal timeout
+                        if time_since_heartbeat > idle_timeout:
+                            logger.warning(f"⚠️ Idle worker {worker_id} timed out, marking offline")
+                            await self.unregister(worker_id)
                         
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"Heartbeat monitor error: {e}")
+

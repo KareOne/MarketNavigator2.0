@@ -244,23 +244,36 @@ class WorkerAgent:
     
     async def _heartbeat_loop(self):
         """Send periodic heartbeats to keep connection alive."""
+        consecutive_failures = 0
         while True:
             try:
                 await asyncio.sleep(config.HEARTBEAT_INTERVAL)
                 
                 # Always send heartbeat to prevent timeout, even during task execution
-                if self._connection_healthy and self.websocket:
+                if self.websocket:
                     try:
                         await self.websocket.send(json.dumps({"type": "heartbeat"}))
+                        consecutive_failures = 0
                         logger.debug("💓 Heartbeat sent")
                     except ConnectionClosed:
-                        logger.warning("Connection lost during heartbeat")
-                        break
+                        consecutive_failures += 1
+                        self._connection_healthy = False
+                        logger.warning(f"⚠️ Heartbeat failed ({consecutive_failures}x) - connection lost")
+                        # If task in progress, don't break loop - let task continue
+                        # The task completion will trigger reconnection
+                        if not self._in_progress_task:
+                            logger.info("No active task, will reconnect...")
+                            break
+                        else:
+                            logger.info("Task in progress, will send result after reconnection")
+                    except Exception as e:
+                        consecutive_failures += 1
+                        logger.warning(f"⚠️ Heartbeat send error: {e}")
                         
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Heartbeat error: {e}")
+                logger.error(f"Heartbeat loop error: {e}")
     
     async def _message_loop(self):
         """Main message processing loop."""
