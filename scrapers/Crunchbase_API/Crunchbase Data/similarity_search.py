@@ -3,10 +3,28 @@ Similarity Search for Crunchbase Companies
 This module provides functionality to find similar companies based on description
 """
 import json
+import os
 import numpy as np
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 from typing import List, Dict
+
+# Local model path - try container path first, then relative path
+LOCAL_MODEL_PATHS = [
+    "/app/models/all-MiniLM-L6-v2",  # Docker container path
+    os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "all-MiniLM-L6-v2"),  # Relative to this file
+]
+
+def _get_model_path(model_name: str) -> str:
+    """Get the local model path if available, otherwise return model name for download."""
+    if model_name == "all-MiniLM-L6-v2":
+        for path in LOCAL_MODEL_PATHS:
+            if os.path.exists(path):
+                print(f"Using local model from: {path}")
+                return path
+    # Fall back to downloading from HuggingFace
+    print(f"Local model not found, will download: {model_name}")
+    return model_name
 
 
 def find_similar_companies(
@@ -49,9 +67,10 @@ def find_similar_companies(
         target = "Machine learning and data analytics solutions"
         results = find_similar_companies(companies_json, target, top_k=5)
     """
-    # Load the embedding model (same as used in the pipeline)
-    print(f"Loading embedding model: {model_name}")
-    model = SentenceTransformer(model_name)
+    # Load the embedding model - try local path first
+    model_path = _get_model_path(model_name)
+    print(f"Loading embedding model: {model_path}")
+    model = SentenceTransformer(model_path)
     
     # Parse the JSON input
     try:
