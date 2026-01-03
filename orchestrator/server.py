@@ -301,8 +301,25 @@ async def worker_websocket(websocket: WebSocket):
         # Signal task queue to check for pending tasks
         task_queue._assignment_event.set()
         
-        # Main message loop
-        while True:
+        # Server-side ping task to keep connection alive during long tasks
+        async def server_ping_loop():
+            """Send periodic ping messages to keep connection alive."""
+            ping_interval = 30  # seconds
+            while True:
+                try:
+                    await asyncio.sleep(ping_interval)
+                    await websocket.send_json({"type": "ping"})
+                    logger.debug(f"📡 Sent ping to {worker_id}")
+                except Exception as e:
+                    logger.debug(f"Ping failed for {worker_id}: {e}")
+                    break
+        
+        # Start ping task in background
+        ping_task = asyncio.create_task(server_ping_loop())
+        
+        try:
+            # Main message loop
+            while True:
             message = await websocket.receive_json()
             msg_type = message.get("type")
             
@@ -364,7 +381,15 @@ async def worker_websocket(websocket: WebSocket):
     except Exception as e:
         logger.error(f"WebSocket error for {worker_id}: {e}")
     finally:
-        # Cleanup
+        # Cancel ping task
+        if 'ping_task' in dir():
+            ping_task.cancel()
+            try:
+                await ping_task
+            except asyncio.CancelledError:
+                pass
+        
+        # Cleanup worker registration
         if authenticated:
             # Check if worker had an active task
             worker = registry.get_worker(worker_id)

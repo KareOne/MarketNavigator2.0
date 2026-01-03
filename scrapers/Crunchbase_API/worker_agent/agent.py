@@ -289,6 +289,13 @@ class WorkerAgent:
                 
                 if msg_type == "task":
                     await self._handle_task(data)
+                elif msg_type == "ping":
+                    # Server ping to keep connection alive - respond with pong
+                    try:
+                        await self.websocket.send(json.dumps({"type": "pong"}))
+                        logger.debug("📡 Received ping, sent pong")
+                    except Exception:
+                        pass  # Connection may be closing
                 elif msg_type == "heartbeat_ack":
                     # Log status confirmation from orchestrator
                     status = data.get("status", "unknown")
