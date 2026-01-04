@@ -51,7 +51,7 @@ class TwitterAPIClient:
         base_delay = 5  # Start with 5s wait for 429
         
         for attempt in range(max_retries + 1):
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=60.0) as client:
                 try:
                     response = await client.request(
                         method=method,
@@ -77,7 +77,7 @@ class TwitterAPIClient:
                     logger.error(f"HTTP error {e.response.status_code}: {e.response.text}")
                     raise
                 except httpx.RequestError as e:
-                    logger.error(f"Request error: {e}")
+                    logger.error(f"Request error ({type(e).__name__}): {e}")
                     raise
     
     async def search_tweets(
