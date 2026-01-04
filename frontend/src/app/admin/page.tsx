@@ -204,6 +204,21 @@ function EnrichmentPanel({ token }: { token: string | null }) {
         }
     };
 
+    const handleResetStuck = async () => {
+        if (!token) return;
+        try {
+            const response = await fetch(`${API_URL}/api/admin/enrichment/reset-stuck/`, {
+                method: "POST",
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (response.ok) {
+                fetchEnrichmentData();
+            }
+        } catch (err) {
+            console.error("Failed to reset stuck keywords:", err);
+        }
+    };
+
     const getStatusColor = (s: string) => {
         switch (s) {
             case "pending": return "#3b82f6";
@@ -250,13 +265,32 @@ function EnrichmentPanel({ token }: { token: string | null }) {
             </div>
 
             {/* Pause/Resume + Current Keyword */}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
                 {status?.current_keyword && (
                     <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        <div className="spinner" style={{ width: "14px", height: "14px" }}></div>
+                        {status.is_active && status.idle_workers < 1 ? (
+                            <div className="spinner" style={{ width: "14px", height: "14px" }}></div>
+                        ) : (
+                            <span style={{ color: "#f97316", fontSize: "12px" }}>⚠️</span>
+                        )}
                         <span style={{ color: "var(--color-text-muted)", fontSize: "14px" }}>
-                            Processing: <strong style={{ color: "var(--color-heading)" }}>{status.current_keyword}</strong>
+                            {status.is_active && status.idle_workers < 1 ? "Processing: " : "Stuck: "}
+                            <strong style={{ color: "var(--color-heading)" }}>{status.current_keyword}</strong>
                         </span>
+                        {status.is_active && status.idle_workers >= 1 && (
+                            <button
+                                onClick={handleResetStuck}
+                                style={{
+                                    padding: "4px 10px",
+                                    background: "#f97316",
+                                    border: "none",
+                                    borderRadius: "var(--radius-sm)",
+                                    color: "#fff",
+                                    fontSize: "11px",
+                                    cursor: "pointer"
+                                }}
+                            >Reset</button>
+                        )}
                     </div>
                 )}
                 <button
@@ -876,8 +910,16 @@ export default function AdminPage() {
     // Tehran timezone
     const TEHRAN_TIMEZONE = "Asia/Tehran";
 
+    // Helper to ensure timestamp is treated as UTC
+    const parseUtcTimestamp = (timestamp: string): Date => {
+        const utcTimestamp = timestamp.endsWith('Z') || timestamp.includes('+') || timestamp.includes('-', 10)
+            ? timestamp
+            : timestamp + 'Z';
+        return new Date(utcTimestamp);
+    };
+
     const formatTime = (timestamp: string) => {
-        const date = new Date(timestamp);
+        const date = parseUtcTimestamp(timestamp);
         return date.toLocaleTimeString("fa-IR", {
             timeZone: TEHRAN_TIMEZONE,
             hour: "2-digit",
@@ -888,7 +930,7 @@ export default function AdminPage() {
     };
 
     const formatDateTime = (timestamp: string) => {
-        const date = new Date(timestamp);
+        const date = parseUtcTimestamp(timestamp);
         return date.toLocaleString("en-US", {
             timeZone: TEHRAN_TIMEZONE,
             month: "short",
@@ -901,7 +943,7 @@ export default function AdminPage() {
 
     const formatDuration = (timestamp: string) => {
         const now = new Date();
-        const then = new Date(timestamp);
+        const then = parseUtcTimestamp(timestamp);
         const diffMs = now.getTime() - then.getTime();
         const diffSecs = Math.floor(diffMs / 1000);
         const diffMins = Math.floor(diffSecs / 60);

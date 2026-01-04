@@ -15,6 +15,7 @@ from .views import (
     EnrichmentStatusView,
     EnrichmentPauseResumeView,
     EnrichmentSettingsView,
+    EnrichmentResetStuckView,
     EnrichmentCallbackView,
     # Internal orchestrator views
     EnrichmentInternalStatusView,
@@ -37,6 +38,7 @@ urlpatterns = [
     path('enrichment/status/', EnrichmentStatusView.as_view(), name='enrichment-status'),
     path('enrichment/pause-resume/', EnrichmentPauseResumeView.as_view(), name='enrichment-pause-resume'),
     path('enrichment/settings/', EnrichmentSettingsView.as_view(), name='enrichment-settings'),
+    path('enrichment/reset-stuck/', EnrichmentResetStuckView.as_view(), name='enrichment-reset-stuck'),
     
     # Internal endpoints (no auth - for orchestrator)
     path('enrichment/callback/', EnrichmentCallbackView.as_view(), name='enrichment-callback'),

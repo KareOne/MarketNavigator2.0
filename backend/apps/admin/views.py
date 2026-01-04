@@ -409,6 +409,42 @@ class EnrichmentSettingsView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+class EnrichmentResetStuckView(APIView):
+    """
+    Reset stuck keywords that are in 'processing' status back to 'pending'.
+    This is useful when a task failed without proper cleanup.
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        # Find keywords stuck in processing
+        stuck_keywords = EnrichmentKeyword.objects.filter(status='processing')
+        count = stuck_keywords.count()
+        
+        if count == 0:
+            return Response({
+                'message': 'No stuck keywords found',
+                'reset_count': 0
+            })
+        
+        # Reset them to pending
+        stuck_keywords.update(status='pending')
+        
+        # Also mark any running history entries as failed
+        EnrichmentHistory.objects.filter(status='running').update(
+            status='failed',
+            completed_at=timezone.now(),
+            error_message='Reset by admin due to stuck processing'
+        )
+        
+        logger.info(f"Admin reset {count} stuck enrichment keywords")
+        
+        return Response({
+            'message': f'Reset {count} stuck keyword(s) to pending',
+            'reset_count': count
+        })
+
+
 class EnrichmentCallbackView(APIView):
     """
     Callback endpoint for orchestrator to update enrichment status.
