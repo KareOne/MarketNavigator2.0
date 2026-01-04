@@ -1487,7 +1487,26 @@ export default function ProjectPage() {
                                                                                                         padding: "2px 0",
                                                                                                         borderBottom: dIdx < step.details.length - 1 ? "1px solid var(--color-border)" : "none"
                                                                                                     }}>
-                                                                                                        {detail.message}
+                                                                                                        {detail.type === 'search_result' ? (
+                                                                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                                                                                                <div>
+                                                                                                                    {detail.message.split(' - Top:')[0]}
+                                                                                                                </div>
+                                                                                                                {detail.data?.full_text && (
+                                                                                                                    <div style={{ marginLeft: "12px", fontSize: "9px", color: "var(--color-text-secondary)" }}>
+                                                                                                                        <span style={{ fontWeight: 600 }}>Top Tweet:</span>{" "}
+                                                                                                                        <ExpandableText text={detail.data.full_text} maxLength={60} />
+                                                                                                                    </div>
+                                                                                                                )}
+                                                                                                                {!detail.data?.full_text && detail.message.includes('Top:') && (
+                                                                                                                    <div style={{ marginLeft: "12px", fontSize: "9px", color: "var(--color-text-secondary)" }}>
+                                                                                                                        {detail.message.split(' - Top:')[1]}
+                                                                                                                    </div>
+                                                                                                                )}
+                                                                                                            </div>
+                                                                                                        ) : (
+                                                                                                            detail.message
+                                                                                                        )}
                                                                                                     </div>
                                                                                                 ))}
                                                                                             </div>
