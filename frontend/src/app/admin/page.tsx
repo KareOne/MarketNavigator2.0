@@ -116,8 +116,17 @@ function EnrichmentPanel({ token }: { token: string | null }) {
             ]);
 
             if (statusRes.ok) setStatus(await statusRes.json());
-            if (keywordsRes.ok) setKeywords(await keywordsRes.json());
-            if (historyRes.ok) setHistory(await historyRes.json());
+
+            // Handle paginated responses from DRF ListViews
+            if (keywordsRes.ok) {
+                const keywordsData = await keywordsRes.json();
+                // DRF pagination returns {count, next, previous, results}
+                setKeywords(Array.isArray(keywordsData) ? keywordsData : keywordsData.results || []);
+            }
+            if (historyRes.ok) {
+                const historyData = await historyRes.json();
+                setHistory(Array.isArray(historyData) ? historyData : historyData.results || []);
+            }
         } catch (err) {
             console.error("Failed to fetch enrichment data:", err);
         } finally {
