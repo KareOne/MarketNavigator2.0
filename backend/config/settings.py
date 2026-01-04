@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     'apps.sharing',
     'apps.files',
     'apps.audit',  # Audit logging
+    'apps.admin.apps.AdminConfig',  # Admin panel and enrichment feature
 ]
 
 MIDDLEWARE = [
