@@ -1,0 +1,22 @@
+# Twitter API Docker Compose
+# Run with: docker-compose up -d
+
+services:
+  twitter_api:
+    build: .
+    container_name: twitter-api
+    ports:
+      - "8004:8004"
+    env_file:
+      - .env
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8004/health" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+networks:
+  default:
+    name: twitter-api-network
