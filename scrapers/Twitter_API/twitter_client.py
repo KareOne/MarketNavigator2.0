@@ -51,7 +51,7 @@ class TwitterAPIClient:
         base_delay = 5  # Start with 5s wait for 429
         
         for attempt in range(max_retries + 1):
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with httpx.AsyncClient(timeout=120.0) as client:
                 try:
                     response = await client.request(
                         method=method,
@@ -66,7 +66,7 @@ class TwitterAPIClient:
                 except httpx.HTTPStatusError as e:
                     if e.response.status_code == 429:
                         if attempt < max_retries:
-                            wait_time = base_delay * (attempt + 1) # simple backoff: 5, 10, 15
+                            wait_time = base_delay * (attempt + 1)
                             logger.warning(f"Rate limit hit (429). Waiting {wait_time}s before retry {attempt + 1}/{max_retries}...")
                             await asyncio.sleep(wait_time)
                             continue
@@ -75,6 +75,14 @@ class TwitterAPIClient:
                             raise
                     
                     logger.error(f"HTTP error {e.response.status_code}: {e.response.text}")
+                    raise
+                except httpx.TimeoutException as e:
+                    if attempt < max_retries:
+                        wait_time = 5 # Wait 5s before retrying timeout
+                        logger.warning(f"Request timed out ({type(e).__name__}). Waiting {wait_time}s before retry {attempt + 1}/{max_retries}...")
+                        await asyncio.sleep(wait_time)
+                        continue
+                    logger.error(f"Max retries reached for Timeout ({type(e).__name__}).")
                     raise
                 except httpx.RequestError as e:
                     logger.error(f"Request error ({type(e).__name__}): {e}")
