@@ -51,6 +51,388 @@ interface TestResult {
     error?: string;
 }
 
+// Enrichment interfaces
+interface EnrichmentKeyword {
+    id: number;
+    keyword: string;
+    num_companies: number;
+    status: "pending" | "processing" | "completed" | "paused" | "failed";
+    priority: number;
+    created_at: string;
+    times_processed: number;
+    last_processed_at: string | null;
+}
+
+interface EnrichmentHistory {
+    id: number;
+    keyword_text: string;
+    started_at: string;
+    completed_at: string | null;
+    status: "running" | "completed" | "failed" | "paused";
+    companies_found: number;
+    companies_scraped: number;
+    companies_skipped: number;
+    worker_id: string | null;
+    error_message: string | null;
+    duration_seconds: number | null;
+}
+
+interface EnrichmentStatus {
+    is_paused: boolean;
+    is_active: boolean;
+    current_keyword: string | null;
+    pending_count: number;
+    processing_count: number;
+    completed_count: number;
+    total_companies_scraped: number;
+    idle_workers: number;
+    days_threshold: number;
+}
+
+// Enrichment Panel Component
+function EnrichmentPanel({ token }: { token: string | null }) {
+    const [status, setStatus] = useState<EnrichmentStatus | null>(null);
+    const [keywords, setKeywords] = useState<EnrichmentKeyword[]>([]);
+    const [history, setHistory] = useState<EnrichmentHistory[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [newKeywords, setNewKeywords] = useState("");
+    const [numCompanies, setNumCompanies] = useState(50);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
+    const fetchEnrichmentData = useCallback(async () => {
+        if (!token) return;
+
+        try {
+            const [statusRes, keywordsRes, historyRes] = await Promise.all([
+                fetch(`${API_URL}/api/admin/enrichment/status/`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                }),
+                fetch(`${API_URL}/api/admin/enrichment/keywords/`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                }),
+                fetch(`${API_URL}/api/admin/enrichment/history/?limit=20`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                }),
+            ]);
+
+            if (statusRes.ok) setStatus(await statusRes.json());
+            if (keywordsRes.ok) setKeywords(await keywordsRes.json());
+            if (historyRes.ok) setHistory(await historyRes.json());
+        } catch (err) {
+            console.error("Failed to fetch enrichment data:", err);
+        } finally {
+            setIsLoading(false);
+        }
+    }, [token]);
+
+    useEffect(() => {
+        fetchEnrichmentData();
+        const interval = setInterval(fetchEnrichmentData, 10000);
+        return () => clearInterval(interval);
+    }, [fetchEnrichmentData]);
+
+    const handleAddKeywords = async () => {
+        if (!newKeywords.trim() || !token) return;
+        setIsSubmitting(true);
+
+        const keywordList = newKeywords
+            .split(/[,\n]+/)
+            .map(k => k.trim())
+            .filter(k => k.length > 0);
+
+        try {
+            const res = await fetch(`${API_URL}/api/admin/enrichment/keywords/`, {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    keywords: keywordList,
+                    num_companies: numCompanies,
+                    priority: 0,
+                }),
+            });
+
+            if (res.ok) {
+                setNewKeywords("");
+                fetchEnrichmentData();
+            }
+        } catch (err) {
+            console.error("Failed to add keywords:", err);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const handlePauseResume = async (action: "pause" | "resume") => {
+        if (!token) return;
+        try {
+            await fetch(`${API_URL}/api/admin/enrichment/pause-resume/`, {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ action }),
+            });
+            fetchEnrichmentData();
+        } catch (err) {
+            console.error("Failed to pause/resume:", err);
+        }
+    };
+
+    const handleDeleteKeyword = async (id: number) => {
+        if (!token) return;
+        try {
+            await fetch(`${API_URL}/api/admin/enrichment/keywords/${id}/`, {
+                method: "DELETE",
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            fetchEnrichmentData();
+        } catch (err) {
+            console.error("Failed to delete keyword:", err);
+        }
+    };
+
+    const getStatusColor = (s: string) => {
+        switch (s) {
+            case "pending": return "#3b82f6";
+            case "processing": case "running": return "#eab308";
+            case "completed": return "#22c55e";
+            case "failed": return "#ef4444";
+            case "paused": return "#6b7280";
+            default: return "#6b7280";
+        }
+    };
+
+    if (isLoading) {
+        return <div style={{ padding: "40px", textAlign: "center" }}><div className="spinner"></div></div>;
+    }
+
+    return (
+        <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+            {/* Status Card */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "16px" }}>
+                <div style={{ padding: "16px", background: "var(--color-surface-muted)", borderRadius: "var(--radius-md)" }}>
+                    <div style={{ fontSize: "12px", color: "var(--color-text-muted)", marginBottom: "4px" }}>Status</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span style={{
+                            width: "10px", height: "10px", borderRadius: "50%",
+                            background: status?.is_paused ? "#6b7280" : status?.is_active ? "#eab308" : "#22c55e"
+                        }} />
+                        <span style={{ fontWeight: 600, color: "var(--color-heading)" }}>
+                            {status?.is_paused ? "Paused" : status?.is_active ? "Active" : "Idle"}
+                        </span>
+                    </div>
+                </div>
+                <div style={{ padding: "16px", background: "var(--color-surface-muted)", borderRadius: "var(--radius-md)" }}>
+                    <div style={{ fontSize: "12px", color: "var(--color-text-muted)", marginBottom: "4px" }}>Pending</div>
+                    <div style={{ fontSize: "24px", fontWeight: 700, color: "var(--color-primary)" }}>{status?.pending_count || 0}</div>
+                </div>
+                <div style={{ padding: "16px", background: "var(--color-surface-muted)", borderRadius: "var(--radius-md)" }}>
+                    <div style={{ fontSize: "12px", color: "var(--color-text-muted)", marginBottom: "4px" }}>Completed</div>
+                    <div style={{ fontSize: "24px", fontWeight: 700, color: "#22c55e" }}>{status?.completed_count || 0}</div>
+                </div>
+                <div style={{ padding: "16px", background: "var(--color-surface-muted)", borderRadius: "var(--radius-md)" }}>
+                    <div style={{ fontSize: "12px", color: "var(--color-text-muted)", marginBottom: "4px" }}>Companies Scraped</div>
+                    <div style={{ fontSize: "24px", fontWeight: 700, color: "var(--color-heading)" }}>{status?.total_companies_scraped || 0}</div>
+                </div>
+            </div>
+
+            {/* Pause/Resume + Current Keyword */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                {status?.current_keyword && (
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <div className="spinner" style={{ width: "14px", height: "14px" }}></div>
+                        <span style={{ color: "var(--color-text-muted)", fontSize: "14px" }}>
+                            Processing: <strong style={{ color: "var(--color-heading)" }}>{status.current_keyword}</strong>
+                        </span>
+                    </div>
+                )}
+                <button
+                    onClick={() => handlePauseResume(status?.is_paused ? "resume" : "pause")}
+                    style={{
+                        padding: "8px 16px",
+                        background: status?.is_paused ? "#22c55e" : "#ef4444",
+                        border: "none",
+                        borderRadius: "var(--radius-sm)",
+                        color: "#fff",
+                        fontSize: "13px",
+                        fontWeight: 500,
+                        cursor: "pointer",
+                        marginLeft: "auto"
+                    }}
+                >
+                    {status?.is_paused ? "▶ Resume Enrichment" : "⏸ Pause Enrichment"}
+                </button>
+            </div>
+
+            {/* Add Keywords Form */}
+            <div style={{ padding: "20px", background: "var(--color-surface-muted)", borderRadius: "var(--radius-md)" }}>
+                <h4 style={{ margin: "0 0 12px", fontSize: "14px", fontWeight: 600, color: "var(--color-heading)" }}>
+                    Add Keywords
+                </h4>
+                <div style={{ display: "flex", gap: "12px", alignItems: "flex-end" }}>
+                    <div style={{ flex: 1 }}>
+                        <textarea
+                            value={newKeywords}
+                            onChange={(e) => setNewKeywords(e.target.value)}
+                            placeholder="Enter keywords (comma or newline separated)..."
+                            rows={2}
+                            style={{
+                                width: "100%",
+                                padding: "10px 12px",
+                                background: "var(--color-surface-elevated)",
+                                border: "1px solid var(--color-border)",
+                                borderRadius: "var(--radius-sm)",
+                                color: "var(--color-text)",
+                                fontSize: "14px",
+                                resize: "vertical"
+                            }}
+                        />
+                    </div>
+                    <div style={{ width: "120px" }}>
+                        <label style={{ fontSize: "11px", color: "var(--color-text-muted)", display: "block", marginBottom: "4px" }}>
+                            Companies/keyword
+                        </label>
+                        <input
+                            type="number"
+                            value={numCompanies}
+                            onChange={(e) => setNumCompanies(parseInt(e.target.value) || 50)}
+                            min={1}
+                            max={500}
+                            style={{
+                                width: "100%",
+                                padding: "10px 12px",
+                                background: "var(--color-surface-elevated)",
+                                border: "1px solid var(--color-border)",
+                                borderRadius: "var(--radius-sm)",
+                                color: "var(--color-text)",
+                                fontSize: "14px"
+                            }}
+                        />
+                    </div>
+                    <button
+                        onClick={handleAddKeywords}
+                        disabled={isSubmitting || !newKeywords.trim()}
+                        style={{
+                            padding: "10px 20px",
+                            background: isSubmitting ? "var(--color-surface-muted)" : "var(--gradient-primary)",
+                            border: "none",
+                            borderRadius: "var(--radius-sm)",
+                            color: "#fff",
+                            fontSize: "14px",
+                            fontWeight: 500,
+                            cursor: isSubmitting ? "not-allowed" : "pointer"
+                        }}
+                    >
+                        {isSubmitting ? "Adding..." : "Add Keywords"}
+                    </button>
+                </div>
+            </div>
+
+            {/* Keywords Queue */}
+            {keywords.length > 0 && (
+                <div>
+                    <h4 style={{ margin: "0 0 12px", fontSize: "14px", fontWeight: 600, color: "var(--color-heading)" }}>
+                        Keyword Queue ({keywords.length})
+                    </h4>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                        {keywords.slice(0, 20).map((kw) => (
+                            <div key={kw.id} style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "8px",
+                                padding: "6px 12px",
+                                background: "var(--color-surface-muted)",
+                                borderRadius: "16px",
+                                border: `1px solid ${getStatusColor(kw.status)}30`,
+                            }}>
+                                <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: getStatusColor(kw.status) }} />
+                                <span style={{ fontSize: "13px", color: "var(--color-text)" }}>{kw.keyword}</span>
+                                <span style={{ fontSize: "11px", color: "var(--color-text-muted)" }}>({kw.num_companies})</span>
+                                {kw.status === "pending" && (
+                                    <button
+                                        onClick={() => handleDeleteKeyword(kw.id)}
+                                        style={{
+                                            background: "none",
+                                            border: "none",
+                                            color: "#ef4444",
+                                            cursor: "pointer",
+                                            fontSize: "14px",
+                                            padding: "0 4px"
+                                        }}
+                                    >×</button>
+                                )}
+                            </div>
+                        ))}
+                        {keywords.length > 20 && (
+                            <span style={{ fontSize: "13px", color: "var(--color-text-muted)", alignSelf: "center" }}>
+                                +{keywords.length - 20} more
+                            </span>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* History Table */}
+            <div>
+                <h4 style={{ margin: "0 0 12px", fontSize: "14px", fontWeight: 600, color: "var(--color-heading)" }}>
+                    Recent History
+                </h4>
+                {history.length === 0 ? (
+                    <div style={{ padding: "20px", textAlign: "center", color: "var(--color-text-muted)", fontSize: "14px" }}>
+                        No enrichment history yet
+                    </div>
+                ) : (
+                    <div style={{ overflowX: "auto" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+                            <thead>
+                                <tr style={{ background: "var(--color-surface-muted)" }}>
+                                    <th style={{ padding: "10px 12px", textAlign: "left", fontWeight: 600, color: "var(--color-text-muted)" }}>Keyword</th>
+                                    <th style={{ padding: "10px 12px", textAlign: "left", fontWeight: 600, color: "var(--color-text-muted)" }}>Status</th>
+                                    <th style={{ padding: "10px 12px", textAlign: "right", fontWeight: 600, color: "var(--color-text-muted)" }}>Scraped</th>
+                                    <th style={{ padding: "10px 12px", textAlign: "right", fontWeight: 600, color: "var(--color-text-muted)" }}>Duration</th>
+                                    <th style={{ padding: "10px 12px", textAlign: "left", fontWeight: 600, color: "var(--color-text-muted)" }}>Started</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {history.map((h) => (
+                                    <tr key={h.id} style={{ borderTop: "1px solid var(--color-border)" }}>
+                                        <td style={{ padding: "10px 12px", color: "var(--color-heading)" }}>{h.keyword_text}</td>
+                                        <td style={{ padding: "10px 12px" }}>
+                                            <span style={{
+                                                padding: "2px 8px",
+                                                borderRadius: "10px",
+                                                fontSize: "11px",
+                                                fontWeight: 500,
+                                                background: `${getStatusColor(h.status)}20`,
+                                                color: getStatusColor(h.status)
+                                            }}>
+                                                {h.status}
+                                            </span>
+                                        </td>
+                                        <td style={{ padding: "10px 12px", textAlign: "right", color: "var(--color-text)" }}>{h.companies_scraped}</td>
+                                        <td style={{ padding: "10px 12px", textAlign: "right", color: "var(--color-text-muted)" }}>
+                                            {h.duration_seconds ? `${Math.round(h.duration_seconds)}s` : "—"}
+                                        </td>
+                                        <td style={{ padding: "10px 12px", color: "var(--color-text-muted)" }}>
+                                            {new Date(h.started_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+
+
 // Test Worker Panel Component
 function TestWorkerPanel({ token, workers }: { token: string | null; workers: Worker[] }) {
     const [selectedWorkerId, setSelectedWorkerId] = useState<string>("");
@@ -834,6 +1216,28 @@ export default function AdminPage() {
                                         </table>
                                     </div>
                                 )}
+                            </div>
+
+                            {/* Database Enrichment Panel */}
+                            <div style={{
+                                background: "var(--color-surface-elevated)",
+                                borderRadius: "var(--radius-lg)",
+                                border: "1px solid var(--color-border)",
+                                overflow: "hidden",
+                                marginTop: "24px"
+                            }}>
+                                <div style={{ padding: "20px 24px", borderBottom: "1px solid var(--color-border)" }}>
+                                    <h2 style={{ margin: 0, fontSize: "18px", fontWeight: 600, color: "var(--color-heading)" }}>
+                                        📚 Database Enrichment
+                                    </h2>
+                                    <p style={{ margin: "4px 0 0", fontSize: "13px", color: "var(--color-text-muted)" }}>
+                                        Background scraping using idle workers (180-day freshness)
+                                    </p>
+                                </div>
+
+                                <div style={{ padding: "24px" }}>
+                                    <EnrichmentPanel token={token} />
+                                </div>
                             </div>
 
                             {/* Worker Test Panel */}

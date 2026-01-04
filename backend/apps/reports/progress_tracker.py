@@ -1,10 +1,12 @@
 """
 Report Progress Tracker Service.
 Scalable progress tracking for all report types with real-time WebSocket updates.
+Includes connection management to prevent pool exhaustion during long-running tasks.
 """
 import logging
 from typing import Optional, Dict, Any, List
 from django.utils import timezone
+from django.db import connection
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 
@@ -14,6 +16,9 @@ logger = logging.getLogger(__name__)
 class ReportProgressTracker:
     """
     Scalable progress tracker for all report types.
+    
+    Includes connection management to prevent DB pool exhaustion during
+    long-running report generation tasks.
     
     Usage:
         tracker = ReportProgressTracker(report)
@@ -71,6 +76,9 @@ class ReportProgressTracker:
         ],
     }
     
+    # Number of DB operations before triggering connection cleanup
+    CONNECTION_CLEANUP_INTERVAL = 10
+    
     def __init__(self, report):
         """
         Initialize tracker for a report.
@@ -81,6 +89,7 @@ class ReportProgressTracker:
         self.report = report
         self.steps_config = self.REPORT_STEPS.get(report.report_type, [])
         self._channel_layer = None
+        self._operation_count = 0  # Track DB operations for periodic cleanup
     
     @property
     def channel_layer(self):
@@ -88,6 +97,14 @@ class ReportProgressTracker:
         if self._channel_layer is None:
             self._channel_layer = get_channel_layer()
         return self._channel_layer
+    
+    def _maybe_cleanup_connection(self):
+        """Periodically close DB connection to prevent pool exhaustion."""
+        self._operation_count += 1
+        if self._operation_count >= self.CONNECTION_CLEANUP_INTERVAL:
+            connection.close()
+            self._operation_count = 0
+            logger.debug("Progress tracker: Released DB connection")
     
     def initialize_steps(self) -> List:
         """
@@ -116,6 +133,7 @@ class ReportProgressTracker:
             created_steps.append(step)
         
         logger.info(f"📋 Initialized {len(created_steps)} progress steps for {self.report.report_type}")
+        self._maybe_cleanup_connection()  # Release connection after batch of creates
         self._broadcast_update()
         return created_steps
     
@@ -143,6 +161,7 @@ class ReportProgressTracker:
             self.report.save(update_fields=['current_step', 'progress', 'updated_at'])
             
             logger.info(f"▶️ Started step: {step.step_name}")
+            self._maybe_cleanup_connection()
             self._broadcast_update()
             return step
         except ReportProgressStep.DoesNotExist:
@@ -240,6 +259,7 @@ class ReportProgressTracker:
             
             logger.info(f"📝 Added detail to step {step_key}: {detail_type} - {message[:50]}...")
             
+            self._maybe_cleanup_connection()  # Periodic cleanup for frequent detail adds
             self._broadcast_update()
         except ReportProgressStep.DoesNotExist:
             logger.warning(f"⚠️ Step {step_key} not found for adding detail")
@@ -299,6 +319,7 @@ class ReportProgressTracker:
             
             duration_str = f"{step.duration_seconds:.1f}s" if step.duration_seconds else "N/A"
             logger.info(f"✅ Completed step: {step.step_name} (duration: {duration_str})")
+            self._maybe_cleanup_connection()
             self._broadcast_update()
             return step
         except ReportProgressStep.DoesNotExist:

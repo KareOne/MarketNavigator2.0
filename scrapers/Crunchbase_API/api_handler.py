@@ -1103,6 +1103,84 @@ async def search_top_similar_companies_with_rank(
             print(f"🗑️ Cleaned up request {request_id}")
 
 
+# =============================================================================
+# Database Enrichment Endpoint
+# =============================================================================
+
+@app.post("/enrich/crunchbase")
+async def enrichment_search(
+    keyword: str = Body(..., description="Keyword to search for"),
+    num_companies: int = Body(50, description="Number of companies to scrape"),
+    days_threshold: int = Body(180, description="Days threshold - defaults to 180 for enrichment"),
+    enrichment_keyword_id: int = Body(None, description="Django keyword ID for callback"),
+) -> Dict:
+    """
+    Database enrichment endpoint - used by orchestrator for background enrichment.
+    
+    This endpoint is specifically designed for background database enrichment:
+    - Uses 180-day freshness threshold by default (vs 15 days for user searches)
+    - Reports progress for monitoring
+    - Returns detailed statistics for tracking
+    
+    The endpoint searches for companies matching the keyword and scrapes
+    their full details, skipping any scraped within days_threshold.
+    """
+    try:
+        start_time = time.time()
+        
+        print(f"\n{'='*60}")
+        print(f"📚 ENRICHMENT: Starting enrichment for '{keyword}'")
+        print(f"   Companies to scrape: {num_companies}")
+        print(f"   Days threshold: {days_threshold}")
+        print(f"   Keyword ID: {enrichment_keyword_id}")
+        print(f"{'='*60}\n")
+        
+        # Run the scraper with enrichment settings
+        result = await run_scraper(
+            keyword,
+            num_companies=num_companies,
+            days_threshold=days_threshold
+        )
+        
+        elapsed_time = time.time() - start_time
+        
+        # Calculate statistics
+        companies_scraped = len(result) if result else 0
+        
+        response_data = {
+            "success": True,
+            "keyword": keyword,
+            "enrichment_keyword_id": enrichment_keyword_id,
+            "companies_found": companies_scraped,  # From search results
+            "companies_scraped": companies_scraped,  # Actually scraped
+            "companies_skipped": 0,  # Could be calculated from scraper
+            "elapsed_time_seconds": round(elapsed_time, 2),
+            "data": result
+        }
+        
+        print(f"\n{'='*60}")
+        print(f"✅ ENRICHMENT COMPLETE: '{keyword}'")
+        print(f"   Companies scraped: {companies_scraped}")
+        print(f"   Time: {elapsed_time:.2f}s")
+        print(f"{'='*60}\n")
+        
+        return response_data
+        
+    except Exception as e:
+        print(f"❌ ENRICHMENT ERROR for '{keyword}': {e}")
+        return {
+            "success": False,
+            "keyword": keyword,
+            "enrichment_keyword_id": enrichment_keyword_id,
+            "companies_found": 0,
+            "companies_scraped": 0,
+            "companies_skipped": 0,
+            "error": str(e)
+        }
+
+
+
+
 @app.get("/companies/all")
 async def get_all_companies_endpoint() -> Dict:
     """

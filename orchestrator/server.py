@@ -22,6 +22,7 @@ from models import (
 from registry import WorkerRegistry
 from task_queue import TaskQueue
 from status_relay import StatusRelay
+from enrichment_manager import EnrichmentManager
 
 # Configure logging
 logging.basicConfig(
@@ -35,12 +36,13 @@ redis_client: redis.Redis = None
 registry: WorkerRegistry = None
 task_queue: TaskQueue = None
 status_relay: StatusRelay = None
+enrichment_manager: EnrichmentManager = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
-    global redis_client, registry, task_queue, status_relay
+    global redis_client, registry, task_queue, status_relay, enrichment_manager
     
     # Startup
     logger.info("🚀 Starting API Orchestrator...")
@@ -60,12 +62,16 @@ async def lifespan(app: FastAPI):
     status_relay = StatusRelay(config.BACKEND_STATUS_URL)
     await status_relay.start()
     
+    enrichment_manager = EnrichmentManager(redis_client, registry, task_queue)
+    await enrichment_manager.start()
+    
     logger.info(f"✅ Orchestrator ready on port {config.ORCHESTRATOR_PORT}")
     
     yield
     
     # Shutdown
     logger.info("🛑 Shutting down API Orchestrator...")
+    await enrichment_manager.stop()
     await status_relay.stop()
     await task_queue.stop()
     await registry.stop()
@@ -364,7 +370,12 @@ async def worker_websocket(websocket: WebSocket):
                     # Worker completed task
                     task_id = message.get("task_id")
                     result = message.get("result", {})
+                    task = await task_queue.get_task(task_id)
                     await task_queue.mark_completed(task_id, result)
+                    
+                    # Notify enrichment manager if this was an enrichment task
+                    if task and task.source == "enrichment":
+                        await enrichment_manager.on_task_complete(task_id, result)
                     
                     # Signal for next task
                     task_queue._assignment_event.set()
@@ -374,7 +385,13 @@ async def worker_websocket(websocket: WebSocket):
                     task_id = message.get("task_id")
                     error = message.get("error", "Unknown error")
                     if task_id:
+                        task = await task_queue.get_task(task_id)
                         await task_queue.mark_failed(task_id, error)
+                        
+                        # Notify enrichment manager if this was an enrichment task
+                        if task and task.source == "enrichment":
+                            keyword_id = task.payload.get("enrichment_keyword_id")
+                            await enrichment_manager.on_task_failed(task_id, error, keyword_id)
                     logger.error(f"Worker {worker_id} error: {error}")
                     
                 else:

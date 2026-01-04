@@ -77,6 +77,7 @@ class CrunchbaseAdapter(BaseAPIAdapter):
         "search_similar_full": "/search/crunchbase/top-similar-full",
         "search_batch": "/search/crunchbase/batch",
         "search_hashtag": "/search/crunchbase/hashtag",
+        "enrich": "/enrich/crunchbase",  # Database enrichment endpoint
         "get_all": "/companies/all",
         "get_by_names": "/companies/by-names",
     }

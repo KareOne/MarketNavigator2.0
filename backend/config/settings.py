@@ -96,10 +96,12 @@ DATABASES = {
         'HOST': os.getenv('DB_HOST', 'localhost'),
         'PORT': os.getenv('DB_PORT', '5432'),
         'POOL_OPTIONS': {
-            'POOL_SIZE': 10,  # Min connections
-            'MAX_OVERFLOW': 20,  # Additional connections under load
-            'RECYCLE': 300,  # Recycle connections after 5 minutes
+            'POOL_SIZE': 20,  # Min connections (increased for production load)
+            'MAX_OVERFLOW': 40,  # Additional connections under load (60 total max)
+            'RECYCLE': 120,  # Recycle connections after 2 minutes (shorter for cloud DB)
             'PRE_PING': True,  # Verify connection before use
+            'POOL_TIMEOUT': 30,  # Wait max 30s for connection from pool
+            'POOL_USE_LIFO': True,  # LIFO reduces number of stale connections
         },
         'CONN_MAX_AGE': None,  # Managed by pool
     }
@@ -177,6 +179,10 @@ CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 3 * 60 * 60  # 3 hours max
 CELERY_WORKER_CONCURRENCY = int(os.getenv('CELERY_CONCURRENCY', '4'))
 CELERY_TASK_SOFT_TIME_LIMIT = int(2.5 * 60 * 60)  # 2.5 hours soft limit
+
+# Connection management: Recycle workers to release DB connections
+CELERY_WORKER_MAX_TASKS_PER_CHILD = 100  # Restart worker after 100 tasks to release connections
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1  # Don't prefetch tasks, reduces connection holding
 
 # Celery Beat scheduled tasks
 CELERY_BEAT_SCHEDULE = {

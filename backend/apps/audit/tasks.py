@@ -73,3 +73,35 @@ def log_audit_event(user_id, action, resource_type=None, resource_id=None, metad
         )
     except Exception as e:
         logger.error(f"Failed to log audit event: {e}")
+
+
+@shared_task(bind=True, max_retries=2, default_retry_delay=5)
+def track_api_usage(self, org_id=None, user_id=None, endpoint=None, method=None, 
+                    status_code=None, response_time_ms=None, request_size=None, response_size=None):
+    """
+    Async task to track API usage.
+    Called from middleware to avoid blocking requests and exhausting DB connections.
+    """
+    from apps.audit.models import APIUsage
+    from django.db import connection
+    
+    try:
+        APIUsage.objects.create(
+            organization_id=org_id,
+            user_id=user_id,
+            endpoint=endpoint,
+            method=method,
+            status_code=status_code,
+            response_time_ms=response_time_ms,
+            request_size=request_size,
+            response_size=response_size,
+        )
+    except Exception as e:
+        logger.error(f"Failed to track API usage: {e}")
+        # Don't retry on DB errors as it might make connection pool issues worse
+        if 'QueuePool' in str(e) or 'connection' in str(e).lower():
+            return  # Don't retry connection-related errors
+        raise self.retry(exc=e)
+    finally:
+        # Explicitly close connection to return it to pool
+        connection.close()

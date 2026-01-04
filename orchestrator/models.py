@@ -51,6 +51,7 @@ class Task(BaseModel):
     assigned_worker_id: Optional[str] = None
     target_worker_id: Optional[str] = None  # Preferred worker to route to
     priority: int = 0  # Higher = more priority
+    source: Literal["backend", "enrichment"] = "backend"  # Task origin
     retry_count: int = 0
     max_retries: int = 3
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -74,6 +75,8 @@ class TaskSubmitRequest(BaseModel):
     payload: Dict[str, Any]
     priority: int = 0
     target_worker_id: Optional[str] = None  # Route to specific worker by ID
+    source: Literal["backend", "enrichment"] = "backend"  # Task origin
+
 
 
 class TaskResponse(BaseModel):

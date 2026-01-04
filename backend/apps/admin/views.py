@@ -197,3 +197,349 @@ class OrchestratorTestTaskView(APIView):
                 {"error": "Failed to connect to orchestrator", "details": str(e)},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
+
+
+# =============================================================================
+# Enrichment Feature Views
+# =============================================================================
+
+from django.db.models import Sum
+from django.utils import timezone
+from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView
+from .models import EnrichmentKeyword, EnrichmentHistory, EnrichmentSettings
+from .serializers import (
+    EnrichmentKeywordSerializer,
+    EnrichmentKeywordCreateSerializer,
+    EnrichmentHistorySerializer,
+    EnrichmentSettingsSerializer,
+)
+
+
+class EnrichmentKeywordListCreateView(ListCreateAPIView):
+    """
+    List all enrichment keywords or create new ones.
+    
+    GET: List all keywords with filtering options
+    POST: Create single or multiple keywords
+    """
+    permission_classes = [IsAuthenticated]
+    serializer_class = EnrichmentKeywordSerializer
+    
+    def get_queryset(self):
+        queryset = EnrichmentKeyword.objects.all()
+        
+        # Filter by status
+        status_filter = self.request.query_params.get('status')
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+        
+        return queryset
+    
+    def post(self, request):
+        """Create single or multiple keywords."""
+        create_serializer = EnrichmentKeywordCreateSerializer(data=request.data)
+        
+        if not create_serializer.is_valid():
+            return Response(create_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        keywords = create_serializer.validated_data['keywords']
+        num_companies = create_serializer.validated_data['num_companies']
+        priority = create_serializer.validated_data['priority']
+        
+        created_keywords = []
+        for keyword_text in keywords:
+            # Skip duplicates
+            if EnrichmentKeyword.objects.filter(keyword=keyword_text, status='pending').exists():
+                continue
+            
+            keyword = EnrichmentKeyword.objects.create(
+                keyword=keyword_text,
+                num_companies=num_companies,
+                priority=priority,
+                created_by=request.user
+            )
+            created_keywords.append(keyword)
+        
+        serializer = EnrichmentKeywordSerializer(created_keywords, many=True)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class EnrichmentKeywordDetailView(RetrieveUpdateDestroyAPIView):
+    """
+    Retrieve, update, or delete an enrichment keyword.
+    """
+    permission_classes = [IsAuthenticated]
+    serializer_class = EnrichmentKeywordSerializer
+    queryset = EnrichmentKeyword.objects.all()
+
+
+class EnrichmentHistoryListView(ListCreateAPIView):
+    """
+    List enrichment history with filtering and pagination.
+    """
+    permission_classes = [IsAuthenticated]
+    serializer_class = EnrichmentHistorySerializer
+    
+    def get_queryset(self):
+        queryset = EnrichmentHistory.objects.select_related('keyword').all()
+        
+        # Filter by status
+        status_filter = self.request.query_params.get('status')
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+        
+        # Filter by keyword
+        keyword_id = self.request.query_params.get('keyword_id')
+        if keyword_id:
+            queryset = queryset.filter(keyword_id=keyword_id)
+        
+        # Limit results
+        limit = self.request.query_params.get('limit', 50)
+        try:
+            limit = int(limit)
+        except ValueError:
+            limit = 50
+        
+        return queryset[:limit]
+
+
+class EnrichmentStatusView(APIView):
+    """
+    Get overall enrichment status including current processing state.
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        settings_obj = EnrichmentSettings.get_settings()
+        
+        # Get counts
+        pending_count = EnrichmentKeyword.objects.filter(status='pending').count()
+        processing_count = EnrichmentKeyword.objects.filter(status='processing').count()
+        completed_count = EnrichmentKeyword.objects.filter(status='completed').count()
+        
+        # Get total companies scraped
+        total_scraped = EnrichmentHistory.objects.filter(
+            status='completed'
+        ).aggregate(total=Sum('companies_scraped'))['total'] or 0
+        
+        # Get current processing keyword
+        current_keyword = None
+        current_processing = EnrichmentKeyword.objects.filter(status='processing').first()
+        if current_processing:
+            current_keyword = current_processing.keyword
+        
+        # Get idle crunchbase workers from orchestrator
+        idle_workers = 0
+        try:
+            with httpx.Client(timeout=5.0) as client:
+                response = client.get(f"{ORCHESTRATOR_URL}/workers/crunchbase/stats")
+                if response.status_code == 200:
+                    stats = response.json()
+                    idle_workers = stats.get('idle', 0)
+        except Exception as e:
+            logger.warning(f"Could not get worker stats: {e}")
+        
+        return Response({
+            'is_paused': settings_obj.is_paused,
+            'is_active': processing_count > 0,
+            'current_keyword': current_keyword,
+            'pending_count': pending_count,
+            'processing_count': processing_count,
+            'completed_count': completed_count,
+            'total_companies_scraped': total_scraped,
+            'idle_workers': idle_workers,
+            'days_threshold': settings_obj.days_threshold,
+        })
+
+
+class EnrichmentPauseResumeView(APIView):
+    """
+    Pause or resume enrichment processing.
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        action = request.data.get('action')  # 'pause' or 'resume'
+        
+        if action not in ['pause', 'resume']:
+            return Response(
+                {'error': "Action must be 'pause' or 'resume'"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        settings_obj = EnrichmentSettings.get_settings()
+        settings_obj.is_paused = (action == 'pause')
+        settings_obj.updated_by = request.user
+        settings_obj.save()
+        
+        # If pausing, update any processing keywords to paused
+        if action == 'pause':
+            EnrichmentKeyword.objects.filter(status='processing').update(status='paused')
+            EnrichmentHistory.objects.filter(status='running').update(status='paused')
+        # If resuming, set paused keywords back to pending
+        elif action == 'resume':
+            EnrichmentKeyword.objects.filter(status='paused').update(status='pending')
+        
+        return Response({
+            'success': True,
+            'is_paused': settings_obj.is_paused,
+            'message': f"Enrichment {'paused' if settings_obj.is_paused else 'resumed'}"
+        })
+
+
+class EnrichmentSettingsView(APIView):
+    """
+    Get or update enrichment settings.
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        settings_obj = EnrichmentSettings.get_settings()
+        serializer = EnrichmentSettingsSerializer(settings_obj)
+        return Response(serializer.data)
+    
+    def patch(self, request):
+        settings_obj = EnrichmentSettings.get_settings()
+        serializer = EnrichmentSettingsSerializer(settings_obj, data=request.data, partial=True)
+        
+        if serializer.is_valid():
+            serializer.save(updated_by=request.user)
+            return Response(serializer.data)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class EnrichmentCallbackView(APIView):
+    """
+    Callback endpoint for orchestrator to update enrichment status.
+    Called when an enrichment task starts, completes, or fails.
+    """
+    permission_classes = []  # No auth required - internal call from orchestrator
+    
+    def post(self, request):
+        """
+        Receive status updates from orchestrator.
+        
+        Request body:
+        {
+            "keyword_id": 123,
+            "action": "start" | "complete" | "error",
+            "task_id": "...",
+            "worker_id": "...",
+            "companies_found": 10,
+            "companies_scraped": 8,
+            "companies_skipped": 2,
+            "error_message": "..."
+        }
+        """
+        keyword_id = request.data.get('keyword_id')
+        action = request.data.get('action')
+        task_id = request.data.get('task_id')
+        worker_id = request.data.get('worker_id')
+        
+        if not keyword_id or not action:
+            return Response(
+                {'error': 'keyword_id and action are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            keyword = EnrichmentKeyword.objects.get(id=keyword_id)
+        except EnrichmentKeyword.DoesNotExist:
+            return Response(
+                {'error': 'Keyword not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        if action == 'start':
+            # Mark keyword as processing
+            keyword.status = 'processing'
+            keyword.save()
+            
+            # Create history entry
+            EnrichmentHistory.objects.create(
+                keyword=keyword,
+                status='running',
+                task_id=task_id,
+                worker_id=worker_id
+            )
+            
+        elif action == 'complete':
+            # Update keyword
+            keyword.status = 'completed'
+            keyword.times_processed += 1
+            keyword.last_processed_at = timezone.now()
+            keyword.save()
+            
+            # Update history entry
+            history = EnrichmentHistory.objects.filter(
+                keyword=keyword,
+                status='running'
+            ).order_by('-started_at').first()
+            
+            if history:
+                history.status = 'completed'
+                history.completed_at = timezone.now()
+                history.companies_found = request.data.get('companies_found', 0)
+                history.companies_scraped = request.data.get('companies_scraped', 0)
+                history.companies_skipped = request.data.get('companies_skipped', 0)
+                history.save()
+        
+        elif action == 'error':
+            # Update keyword
+            keyword.status = 'failed'
+            keyword.save()
+            
+            # Update history entry
+            history = EnrichmentHistory.objects.filter(
+                keyword=keyword,
+                status='running'
+            ).order_by('-started_at').first()
+            
+            if history:
+                history.status = 'failed'
+                history.completed_at = timezone.now()
+                history.error_message = request.data.get('error_message', 'Unknown error')
+                history.save()
+        
+        return Response({'success': True})
+
+
+# =============================================================================
+# Internal Orchestrator Endpoints (No Auth)
+# =============================================================================
+
+class EnrichmentInternalStatusView(APIView):
+    """
+    Internal status endpoint for orchestrator.
+    Returns minimal status info needed for enrichment dispatch decisions.
+    """
+    permission_classes = []  # No auth - internal use only
+    
+    def get(self, request):
+        settings_obj = EnrichmentSettings.get_settings()
+        pending_count = EnrichmentKeyword.objects.filter(status='pending').count()
+        
+        return Response({
+            'is_paused': settings_obj.is_paused,
+            'pending_count': pending_count,
+            'days_threshold': settings_obj.days_threshold,
+        })
+
+
+class EnrichmentInternalKeywordsView(APIView):
+    """
+    Internal keywords endpoint for orchestrator.
+    Returns pending keywords ordered by priority.
+    """
+    permission_classes = []  # No auth - internal use only
+    
+    def get(self, request):
+        keywords = EnrichmentKeyword.objects.filter(status='pending').order_by('-priority', 'created_at')[:10]
+        return Response([{
+            'id': k.id,
+            'keyword': k.keyword,
+            'num_companies': k.num_companies,
+            'priority': k.priority,
+        } for k in keywords])
+
