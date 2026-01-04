@@ -1,0 +1,51 @@
+# Twitter API Remote Worker Deployment
+# Deploy this alongside the Twitter API to connect to the main orchestrator
+
+services:
+  # ==========================================================================
+  # Twitter API Scraper
+  # ==========================================================================
+  twitter_api:
+    build: .
+    container_name: remote-twitter-api
+    command: uvicorn api:app --host 0.0.0.0 --port 8004 --reload
+    ports:
+      - "8004:8004"
+    volumes:
+      - .:/app
+    environment:
+      # Status callbacks go to worker_agent which relays via WebSocket to orchestrator
+      STATUS_CALLBACK_URL: http://worker_agent:9099
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8004/health" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # ==========================================================================
+  # Worker Agent (connects to main server orchestrator)
+  # ==========================================================================
+  worker_agent:
+    build:
+      context: ./worker_agent
+      dockerfile: Dockerfile
+    container_name: remote-twitter-worker
+    # No sleep needed - agent waits for local API to be ready before connecting
+    command: python agent.py
+    ports:
+      - "9099:9099" # Status proxy port (internal use only)
+    env_file:
+      - .env.remote
+    environment:
+      - LOCAL_API_URL=http://twitter_api:8004
+      - HEARTBEAT_INTERVAL=10
+      - RECONNECT_DELAY=5
+    depends_on:
+      - twitter_api
+    restart: unless-stopped
+
+networks:
+  default:
+    name: twitter-remote-network

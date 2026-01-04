@@ -211,8 +211,9 @@ class WorkerRegistry:
                 
                 now = datetime.utcnow()
                 idle_timeout = timedelta(seconds=config.WORKER_TIMEOUT)
-                # Give working workers much more time - tasks can run 3+ hours
-                working_timeout = timedelta(seconds=config.WORKER_TIMEOUT * 50)  # ~4 hours with 5 min base
+                # Working workers send heartbeats too (via separate task)
+                # Use slightly longer timeout than idle to be safe, but not 4 hours
+                working_timeout = timedelta(seconds=config.WORKER_TIMEOUT * 3)  # ~15 mins with 5 min base
                 
                 for worker_id, worker in list(self.workers.items()):
                     time_since_heartbeat = now - worker.last_heartbeat

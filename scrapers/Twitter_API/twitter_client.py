@@ -43,26 +43,42 @@ class TwitterAPIClient:
         params: Optional[Dict[str, Any]] = None,
         json_data: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """Make an HTTP request to the API."""
+        """Make an HTTP request to the API with retry logic."""
+        import asyncio
         url = f"{self.base_url}{endpoint}"
         
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            try:
-                response = await client.request(
-                    method=method,
-                    url=url,
-                    headers=self.headers,
-                    params=params,
-                    json=json_data
-                )
-                response.raise_for_status()
-                return response.json()
-            except httpx.HTTPStatusError as e:
-                logger.error(f"HTTP error {e.response.status_code}: {e.response.text}")
-                raise
-            except httpx.RequestError as e:
-                logger.error(f"Request error: {e}")
-                raise
+        max_retries = 3
+        base_delay = 5  # Start with 5s wait for 429
+        
+        for attempt in range(max_retries + 1):
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                try:
+                    response = await client.request(
+                        method=method,
+                        url=url,
+                        headers=self.headers,
+                        params=params,
+                        json=json_data
+                    )
+                    response.raise_for_status()
+                    return response.json()
+                    
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code == 429:
+                        if attempt < max_retries:
+                            wait_time = base_delay * (attempt + 1) # simple backoff: 5, 10, 15
+                            logger.warning(f"Rate limit hit (429). Waiting {wait_time}s before retry {attempt + 1}/{max_retries}...")
+                            await asyncio.sleep(wait_time)
+                            continue
+                        else:
+                            logger.error("Max retries reached for 429 error.")
+                            raise
+                    
+                    logger.error(f"HTTP error {e.response.status_code}: {e.response.text}")
+                    raise
+                except httpx.RequestError as e:
+                    logger.error(f"Request error: {e}")
+                    raise
     
     async def search_tweets(
         self, 

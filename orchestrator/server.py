@@ -164,6 +164,15 @@ async def get_task_status(task_id: str):
     )
 
 
+@app.delete("/tasks/pending")
+async def clear_pending_tasks(api_type: str):
+    """Clear all pending tasks for a specific API type."""
+    if not api_type:
+        raise HTTPException(status_code=400, detail="api_type is required")
+    count = await task_queue.clear_pending(api_type)
+    return {"status": "cleared", "count": count, "api_type": api_type}
+
+
 @app.delete("/tasks/{task_id}")
 async def cancel_task(task_id: str):
     """Cancel a pending or assigned task."""

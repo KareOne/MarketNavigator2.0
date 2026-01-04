@@ -205,29 +205,38 @@ async def search_tweets(request: SearchRequest):
             max_results=request.num_posts
         )
         
-        logger.info(f"Found {len(raw_tweets)} tweets")
+        logger.info(f"API returned {len(raw_tweets)} raw tweets for '{request.keyword}'")
+        if len(raw_tweets) > 0:
+            logger.info(f"Sample tweet ID: {raw_tweets[0].get('id')} - {raw_tweets[0].get('text')[:30]}...")
+        else:
+            logger.warning(f"No tweets found for keyword: '{request.keyword}' via twitterapi.io")
         
         # Parse tweets and optionally fetch replies
         tweets = []
         for raw_tweet in raw_tweets:
-            replies = []
-            
-            # Fetch replies if requested
-            if request.num_comments > 0:
-                tweet_id = raw_tweet.get("id", "")
-                if tweet_id:
-                    try:
-                        raw_replies = await twitter_client.get_tweet_replies_with_pagination(
-                            tweet_id=tweet_id,
-                            max_replies=request.num_comments
-                        )
-                        replies = [parse_reply(r) for r in raw_replies]
-                        logger.info(f"Fetched {len(replies)} replies for tweet {tweet_id}")
-                    except Exception as e:
-                        logger.warning(f"Failed to fetch replies for tweet {tweet_id}: {e}")
-            
-            tweets.append(parse_tweet(raw_tweet, replies))
+            try:
+                replies = []
+                
+                # Fetch replies if requested
+                if request.num_comments > 0:
+                    tweet_id = raw_tweet.get("id", "")
+                    if tweet_id:
+                        try:
+                            raw_replies = await twitter_client.get_tweet_replies_with_pagination(
+                                tweet_id=tweet_id,
+                                max_replies=request.num_comments
+                            )
+                            replies = [parse_reply(r) for r in raw_replies]
+                            logger.info(f"Fetched {len(replies)} replies for tweet {tweet_id}")
+                        except Exception as e:
+                            logger.warning(f"Failed to fetch replies for tweet {tweet_id}: {e}")
+                
+                tweets.append(parse_tweet(raw_tweet, replies))
+            except Exception as e:
+                 logger.error(f"Error parsing tweet {raw_tweet.get('id')}: {e}")
         
+        logger.info(f"Returning {len(tweets)} parsed tweets")
+
         return SearchResponse(
             keyword=request.keyword,
             query_type=request.query_type,

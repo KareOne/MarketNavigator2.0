@@ -16,7 +16,29 @@ services:
       retries: 3
       start_period: 10s
     restart: unless-stopped
+    networks:
+      - twitter-net
+
+  worker_agent:
+    build:
+      context: ./worker_agent
+      dockerfile: Dockerfile
+    container_name: twitter-worker
+    command: python agent.py
+    environment:
+      - ORCHESTRATOR_URL=${ORCHESTRATOR_URL:-ws://host.docker.internal:8010/ws/worker}
+      - WORKER_TOKEN=${WORKER_TOKEN:-dev-social-token}
+      - API_TYPE=social
+      - LOCAL_API_URL=http://twitter_api:8004
+      - HEARTBEAT_INTERVAL=10
+      - LOG_LEVEL=INFO
+    depends_on:
+      - twitter_api
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - twitter-net
 
 networks:
-  default:
-    name: twitter-api-network
+  twitter-net:
+    driver: bridge

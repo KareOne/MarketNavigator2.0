@@ -61,6 +61,7 @@ class OrchestratorWorkersView(APIView):
             )
 
 
+
 class OrchestratorQueueView(APIView):
     """Proxy endpoint for orchestrator queue statistics."""
     permission_classes = [IsAuthenticated]
@@ -82,6 +83,58 @@ class OrchestratorQueueView(APIView):
                 {"error": "Failed to connect to orchestrator", "details": str(e)},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
+
+
+class OrchestratorClearQueueView(APIView):
+    """Proxy endpoint to clear pending tasks or cancel a specific task."""
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request):
+        api_type = request.query_params.get('api_type')
+        task_id = request.query_params.get('task_id')
+        
+        if task_id:
+            try:
+                with httpx.Client(timeout=5.0) as client:
+                    response = client.delete(f"{ORCHESTRATOR_URL}/tasks/{task_id}")
+                    if response.status_code == 200:
+                        return Response(response.json())
+                    else:
+                        return Response(
+                            {"error": "Orchestrator returned error", "details": response.text},
+                            status=status.HTTP_502_BAD_GATEWAY
+                        )
+            except Exception as e:
+                logger.error(f"Failed to cancel task on orchestrator: {e}")
+                return Response(
+                    {"error": "Failed to connect to orchestrator", "details": str(e)},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE
+                )
+        
+        elif api_type:
+            try:
+                with httpx.Client(timeout=5.0) as client:
+                    response = client.delete(f"{ORCHESTRATOR_URL}/tasks/pending", params={"api_type": api_type})
+                    if response.status_code == 200:
+                        return Response(response.json())
+                    else:
+                        return Response(
+                            {"error": "Orchestrator returned error", "details": response.text},
+                            status=status.HTTP_502_BAD_GATEWAY
+                        )
+            except Exception as e:
+                logger.error(f"Failed to clear queue on orchestrator: {e}")
+                return Response(
+                    {"error": "Failed to connect to orchestrator", "details": str(e)},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE
+                )
+        
+        else:
+             return Response(
+                {"error": "Either api_type or task_id is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
 
 
 class OrchestratorWorkerStatsView(APIView):

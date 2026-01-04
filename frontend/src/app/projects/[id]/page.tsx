@@ -5,6 +5,7 @@ import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import TopBar from "@/components/TopBar";
+import ExpandableText from "@/components/ExpandableText";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000";
@@ -1248,9 +1249,22 @@ export default function ProjectPage() {
                                                                                                                 </div>
                                                                                                             </div>
                                                                                                         ) : detail.type === 'search_result' ? (
-                                                                                                            <div>
-                                                                                                                <span style={{ color: "var(--color-success)" }}>🔍</span>
-                                                                                                                <span style={{ marginLeft: "6px" }}>{detail.message}</span>
+                                                                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                                                                                                <div>
+                                                                                                                    <span style={{ color: "var(--color-success)" }}>🔍</span>
+                                                                                                                    <span style={{ marginLeft: "6px" }}>{detail.message.split(' - Top:')[0]}</span>
+                                                                                                                </div>
+                                                                                                                {detail.data?.full_text && (
+                                                                                                                    <div style={{ marginLeft: "24px", fontSize: "10px", color: "var(--color-text-secondary)" }}>
+                                                                                                                        <span style={{ fontWeight: 600 }}>Top Tweet:</span>{" "}
+                                                                                                                        <ExpandableText text={detail.data.full_text} maxLength={60} />
+                                                                                                                    </div>
+                                                                                                                )}
+                                                                                                                {!detail.data?.full_text && detail.message.includes('Top:') && (
+                                                                                                                    <div style={{ marginLeft: "24px", fontSize: "10px", color: "var(--color-text-secondary)" }}>
+                                                                                                                        {detail.message.split(' - Top:')[1]}
+                                                                                                                    </div>
+                                                                                                                )}
                                                                                                             </div>
                                                                                                         ) : detail.type === 'company_rank' ? (
                                                                                                             /* Sorted company with numbered list, inline description that expands on click */
@@ -1271,24 +1285,9 @@ export default function ProjectPage() {
                                                                                                                             (CB Rank: {detail.data?.cb_rank || 'N/A'})
                                                                                                                         </span>
                                                                                                                         {" "}
-                                                                                                                        {desc && (
-                                                                                                                            <span style={{ fontSize: "10px", color: "var(--color-text-secondary)" }}>
-                                                                                                                                — {isLong ? (
-                                                                                                                                    <>
-                                                                                                                                        <details style={{ display: "inline" }} className="inline-expand">
-                                                                                                                                            <summary style={{ display: "inline", cursor: "pointer", listStyle: "none" }}>
-                                                                                                                                                <span className="truncated-text">{desc.slice(0, 60)}...</span>
-                                                                                                                                                <span className="full-text" style={{ display: "none" }}>{desc}</span>
-                                                                                                                                            </summary>
-                                                                                                                                        </details>
-                                                                                                                                        <style>{`
-                                                                                                                                            .inline-expand[open] .truncated-text { display: none !important; }
-                                                                                                                                            .inline-expand[open] .full-text { display: inline !important; }
-                                                                                                                                        `}</style>
-                                                                                                                                    </>
-                                                                                                                                ) : desc}
-                                                                                                                            </span>
-                                                                                                                        )}
+                                                                                                                        <span style={{ fontSize: "10px", color: "var(--color-text-secondary)" }}>
+                                                                                                                            — <ExpandableText text={desc} maxLength={60} />
+                                                                                                                        </span>
                                                                                                                     </div>
                                                                                                                 );
                                                                                                             })()

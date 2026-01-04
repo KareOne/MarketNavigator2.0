@@ -596,7 +596,9 @@ def generate_crunchbase_report(self, report_id, user_id):
                     'sections_count': section_order,
                     'generated_at': report.completed_at.isoformat() if report.completed_at else None,
                     'version': report.current_version,
-                }
+                    'status': 'success'
+                },
+                report_type='crunchbase'
             )
             logger.info(f"✅ Saved report metadata JSON for project {project.id}")
         except Exception as e:
@@ -607,6 +609,7 @@ def generate_crunchbase_report(self, report_id, user_id):
         logger.info(f"✅ Crunchbase report generated for project {project.id} with {section_order} sections")
         return {"status": "success", "version": report.current_version, "sections": section_order}
         
+
     except Exception as e:
         logger.error(f"❌ Failed to generate Crunchbase report: {e}")
         if report:
@@ -621,6 +624,297 @@ def generate_crunchbase_report(self, report_id, user_id):
                 if running_step:
                     tracker.fail_step(running_step.step_key, str(e))
         raise
+
+
+@shared_task(bind=True, queue='reports')
+def generate_social_report(self, report_id, user_id):
+    """
+    Generate Social Media (Twitter) analysis report.
+    Per Task Plan.
+    
+    Pipeline Steps:
+    1. Generate Social Keywords (User needs -> Hashtags/Phrases)
+    2. Search Twitter via Orchestrator (Top & Latest)
+    3. Analyze Tweets (Segmentation, JTBD, Pain Points, WTP, Competitors, Sentiment)
+    4. Generate Executive Summary
+    5. Save Report
+    """
+    from .models import Report, ReportVersion, ReportAnalysisSection
+    from .progress_tracker import ReportProgressTracker
+    from apps.users.models import User
+    from services.keyword_generator import generate_social_keywords_async
+    from services.scrapers.twitter_scraper import twitter_scraper
+    from services.twitter_analysis import TwitterAnalysisPipeline
+    from core.storage import storage_service
+    from services.report_storage import report_storage
+    
+    report = None
+    tracker = None
+    
+    try:
+        report = Report.objects.get(id=report_id)
+        user = User.objects.get(id=user_id)
+        project = report.project
+        inputs = project.inputs
+        
+        # Mark as running
+        report.status = 'running'
+        report.started_at = timezone.now()
+        report.save()
+        
+        # Initialize progress tracker
+        tracker = ReportProgressTracker(report)
+        tracker.initialize_steps() # Assumes social steps are defined or generic enough
+        
+        # ===== Step 1: Generate Social Keywords =====
+        tracker.start_step('init')
+        tracker.update_step_message('init', "Generating social media search keywords...")
+        
+        project_input_dict = get_project_inputs_dict(inputs)
+        
+        # Force fresh generation for social (different from crunchbase keywords)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            kw_result = loop.run_until_complete(generate_social_keywords_async(project_input_dict))
+            keywords = kw_result['keywords']
+            target_desc = kw_result['target_description']
+            
+            # Save to report data for reference (keywords used)
+            report.data['social_keywords'] = keywords
+            report.save()
+            
+            for kw in keywords:
+                tracker.add_step_detail('init', 'keyword', kw, {'keyword': kw})
+            
+            tracker.complete_step('init', {'keywords_count': len(keywords)})
+            
+        except Exception as e:
+            logger.error(f"Keyword generation failed: {e}")
+            tracker.fail_step('init', str(e))
+            raise
+        
+        # ===== Step 2: Search Twitter =====
+        tracker.start_step('api_search')
+        
+        # Search for top keywords
+        # Using top 3 keywords as requested
+        search_keywords = keywords[:3]
+        tracker.update_step_message('api_search', f"Searching Twitter for {len(search_keywords)} topics...")
+        
+        all_tweets = []
+        try:
+            # Run searches sequentially with delay to respect rate limit (5s)
+            results_list = []
+            
+            for i, kw in enumerate(search_keywords):
+                if i > 0:
+                    tracker.update_step_message('api_search', f"Waiting 6s before next search (Rate Limit)...")
+                    # Wait 6s between requests
+                    loop.run_until_complete(asyncio.sleep(6))
+                
+                tracker.update_step_message('api_search', f"Searching for '{kw}'...")
+                
+                try:
+                    res = loop.run_until_complete(
+                        twitter_scraper.search_tweets(
+                            keywords=[kw],
+                            limit=10,
+                            report_id=str(report.id)
+                        )
+                    )
+                    results_list.append(res)
+                except Exception as e:
+                    logger.error(f"Search failed for '{kw}': {e}")
+                    results_list.append(e)
+            
+            for i, res in enumerate(results_list):
+                kw = search_keywords[i]
+                if isinstance(res, dict) and 'tweets' in res:
+                    found_count = len(res['tweets'])
+                    all_tweets.extend(res['tweets'])
+                    
+                    # Prepare detail message and data
+                    message = f"Found {found_count} tweets for '{kw}'"
+                    detail_data = {'keyword': kw, 'count': found_count}
+                    
+                    # Add top tweet info if available (for expandable description)
+                    if res['tweets']:
+                        top_tweet = res['tweets'][0]
+                        author_name = top_tweet.get('author', {}).get('name', 'Unknown')
+                        tweet_text = top_tweet.get('text', '')
+                        
+                        # The frontend likely uses 'description' for expandable content
+                        detail_data['description'] = f"@{author_name}: {tweet_text}"
+                        detail_data['top_tweet_id'] = top_tweet.get('id')
+                        
+                        # Update title to include preview
+                        preview = tweet_text[:50] + "..." if len(tweet_text) > 50 else tweet_text
+                        # Ensure full text is available for frontend expansion
+                        if 'full_text' not in detail_data:
+                            detail_data['full_text'] = tweet_text
+
+                        message += f" - Top: {preview}"
+
+                    tracker.add_step_detail(
+                        'api_search', 
+                        'search_result', 
+                        message, 
+                        detail_data
+                    )
+                elif isinstance(res, Exception):
+                    logger.warning(f"Search failed for '{kw}': {res}")
+                    tracker.add_step_detail('api_search', 'error', f"Search failed for '{kw}'")
+            
+            # Dedup tweets by ID
+            seen_ids = set()
+            unique_tweets = []
+            for t in all_tweets:
+                if t['id'] not in seen_ids:
+                    seen_ids.add(t['id'])
+                    unique_tweets.append(t)
+            all_tweets = unique_tweets
+            
+            tracker.update_step_message('api_search', f"Found {len(all_tweets)} unique tweets.")
+            tracker.complete_step('api_search', {'tweets_found': len(all_tweets)})
+            
+            # Save Raw Data
+            try:
+                org_id = str(project.organization_id) if project.organization_id else 'default'
+                report_storage.save_twitter_raw_data(
+                    project_id=str(project.id),
+                    org_id=org_id,
+                    version=report.current_version + 1,
+                    raw_data=all_tweets
+                )
+            except Exception as e:
+                logger.warning(f"Failed to save raw Twitter data: {e}")
+            
+        except Exception as e:
+            logger.error(f"Twitter search failed: {e}")
+            tracker.fail_step('api_search', str(e))
+            raise
+
+        # ===== Step 3: Analysis =====
+        tracker.start_step('analysis')
+        
+        analysis_pipeline = TwitterAnalysisPipeline()
+        
+        from asgiref.sync import sync_to_async
+        
+        class AsyncTracker:
+            def __init__(self, tracker):
+                self.tracker = tracker
+            async def update_step_message(self, *args, **kwargs):
+                await sync_to_async(self.tracker.update_step_message)(*args, **kwargs)
+            async def add_step_detail(self, *args, **kwargs):
+                await sync_to_async(self.tracker.add_step_detail)(*args, **kwargs)
+
+        async_tracker = AsyncTracker(tracker)
+        
+        try:
+            analysis_results = loop.run_until_complete(
+                analysis_pipeline.analyze(all_tweets, tracker=async_tracker)
+            )
+            tracker.complete_step('analysis', {'sections': len(analysis_results)})
+        except Exception as e:
+            logger.error(f"Analysis failed: {e}")
+            tracker.fail_step('analysis', str(e))
+            raise
+
+        # ===== Step 4: Save & Generate HTML =====
+        tracker.start_step('save')
+        
+        section_order = 0
+        
+        # We need to format HTML.
+        # Since we don't have a specific `generate_social_html` yet, we can create a simple one or basic formatting.
+        # Or store JSON sections and let Frontend render.
+        # `generate_crunchbase_report` does both.
+        
+        # Save sections
+        for key, content in analysis_results.items():
+            ReportAnalysisSection.objects.create(
+                report=report,
+                section_type=key,
+                content_markdown=str(content), # It returns JSON string often, or markdown
+                order=section_order
+            )
+            section_order += 1
+            
+            # S3
+            try:
+                org_id = str(project.organization_id) if project.organization_id else 'default'
+                report_storage.save_analysis_section(
+                    project_id=str(project.id),
+                    org_id=org_id,
+                    version=report.current_version + 1,
+                    section_type=key,
+                    content=str(content),  # Convert to string/markdown if it's a dict/json
+                    report_type='social'
+                )
+            except Exception as e:
+                logger.warning(f"S3 save failed: {e}")
+
+        # Finalize
+        # Create a simple HTML report for now
+        html_content = f"<h1>Social Media Analysis for {project.name}</h1>"
+        html_content += f"<h2>Executive Summary</h2><p>{analysis_results.get('executive_summary', '')}</p>"
+        
+        report.current_version += 1
+        ReportVersion.objects.create(
+            report=report,
+            version_number=report.current_version,
+            html_content=html_content,
+            data_snapshot={'tweet_count': len(all_tweets)},
+            changes_summary=f"Analysis of {len(all_tweets)} tweets",
+            generated_by=user
+        )
+        
+        report.status = 'completed'
+        report.progress = 100
+        report.current_step = 'Complete!'
+        report.html_content = html_content
+        report.save()
+        
+        # Save report metadata JSON
+        try:
+            org_id = str(project.organization_id) if project.organization_id else 'default'
+            report_storage.save_report_metadata(
+                project_id=str(project.id),
+                org_id=org_id,
+                version=report.current_version,
+                metadata={
+                    'report_id': str(report.id),
+                    'project_id': str(project.id),
+                    'org_id': org_id,
+                    'keywords': keywords,
+                    'tweets_count': len(all_tweets),
+                    'sections_count': section_order,
+                    'generated_at': report.completed_at.isoformat() if report.completed_at else None,
+                    'version': report.current_version,
+                    'status': 'success'
+                },
+                report_type='social'
+            )
+            logger.info(f"✅ Saved Social report metadata JSON for project {project.id}")
+        except Exception as e:
+            logger.warning(f"Failed to save Social report metadata JSON: {e}")
+        
+        tracker.complete_step('save')
+        loop.close()
+        
+        return {"status": "success", "tweets": len(all_tweets)}
+
+    except Exception as e:
+        logger.error(f"❌ Failed to generate Social report: {e}")
+        if report:
+            report.status = 'failed'
+            report.error_message = str(e)
+            report.save()
+        raise
+
 
 
 @shared_task(bind=True, queue='reports')
@@ -1004,7 +1298,6 @@ def generate_tracxn_report(self, report_id, user_id):
                     org_id=org_id,
                     project_id=str(project.id),
                     report_type='tracxn',
-                    report_id=str(report.id),
                     content=html_content.encode(),
                     file_type='html'
                 )
@@ -1038,6 +1331,31 @@ def generate_tracxn_report(self, report_id, user_id):
         report.completed_at = timezone.now()
         report.save()
         
+        # Save report metadata JSON
+        try:
+            org_id = str(project.organization_id) if project.organization_id else 'default'
+            report_storage.save_report_metadata(
+                project_id=str(project.id),
+                org_id=org_id,
+                version=report.current_version,
+                metadata={
+                    'report_id': str(report.id),
+                    'project_id': str(project.id),
+                    'org_id': org_id,
+                    'keywords': keywords,
+                    'target_description': target_description,
+                    'company_count': analysis_result['company_count'],
+                    'sections_count': section_order,
+                    'generated_at': report.completed_at.isoformat() if report.completed_at else None,
+                    'version': report.current_version,
+                    'status': 'success'
+                },
+                report_type='tracxn'
+            )
+            logger.info(f"✅ Saved Tracxn report metadata JSON for project {project.id}")
+        except Exception as e:
+            logger.warning(f"Failed to save Tracxn report metadata JSON: {e}")
+            
         tracker.complete_step('save', {'version': report.current_version, 'sections': section_order})
         
         logger.info(f"✅ Tracxn report generated for project {project.id} with {section_order} sections")

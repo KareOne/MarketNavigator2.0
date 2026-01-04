@@ -304,7 +304,7 @@ export default function ReportPage() {
                         {/* Report Title */}
                         <div style={{ padding: "16px", borderBottom: "1px solid var(--color-border)" }}>
                             <span style={{ fontSize: "11px", fontWeight: 600, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                                Crunchbase Report
+                                {report?.report_type ? `${report.report_type} Report` : 'Analysis Report'}
                             </span>
                             <h3 style={{ margin: "8px 0 0", fontSize: "15px", fontWeight: 600, color: "var(--color-heading)" }}>
                                 {project?.name || "Report"}
@@ -436,7 +436,9 @@ export default function ReportPage() {
                                 </div>
                                 <div>
                                     <h1 style={{ margin: 0, fontSize: "22px", fontWeight: 700, color: "var(--color-heading)" }}>
-                                        Crunchbase Analysis Report
+                                        {report?.report_type === 'social' ? 'Social Media Analysis Report' :
+                                            report?.report_type === 'tracxn' ? 'Tracxn Market Report' :
+                                                'Crunchbase Analysis Report'}
                                     </h1>
                                     <p style={{ margin: "4px 0 0", fontSize: "13px", color: "var(--color-text-muted)" }}>
                                         {project?.name} • {report?.completed_at ? new Date(report.completed_at).toLocaleDateString() : 'In Progress'}

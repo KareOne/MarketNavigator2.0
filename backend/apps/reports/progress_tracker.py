@@ -64,8 +64,10 @@ class ReportProgressTracker:
             {'key': 'save', 'name': 'Saving', 'description': 'Saving report and analysis sections', 'weight': 6},
         ],
         'social': [
-            {'key': 'init', 'name': 'Initializing', 'description': 'Setting up social analysis', 'weight': 10},
-            {'key': 'disabled_notice', 'name': 'Feature Disabled', 'description': 'Social analysis temporarily unavailable', 'weight': 90},
+            {'key': 'init', 'name': 'Generating Keywords', 'description': 'Creating AI-powered social search keywords', 'weight': 5},
+            {'key': 'api_search', 'name': 'Searching Twitter', 'description': 'Searching for relevant discussions and tweets', 'weight': 35},
+            {'key': 'analysis', 'name': 'Analyzing Tweets', 'description': 'analyzing market sentiment and customer needs', 'weight': 55},
+            {'key': 'save', 'name': 'Saving', 'description': 'Saving report and analysis sections', 'weight': 5},
         ],
         'pitch_deck': [
             {'key': 'init', 'name': 'Initializing', 'description': 'Gathering project data', 'weight': 10},

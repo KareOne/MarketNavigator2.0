@@ -78,6 +78,62 @@ KEYWORD_GENERATION_TOOL = {
 }
 
 
+
+# Social Keyword Generation Prompt
+SOCIAL_KEYWORD_AI_SYSTEM_PROMPT = """You are a specialized Keyword Generation AI for Social Media Market Research (Twitter/X).
+
+YOUR JOB: Analyze startup information and generate targeted search keywords to find relevant discussions, trends, and user feedback on social media.
+
+## CRITICAL RULES:
+1. YOU MUST ALWAYS call the generate_social_keywords tool.
+2. Generate exactly 3 high-value keywords/phrases.
+3. Focus on how REAL USERS talk (informal, problem-oriented, hashtags).
+4. Cover these categories:
+   - Market Trends: "AI adoption", "remote work trends"
+   - User Behavior: "how to automate", "looking for alternative to"
+   - Pain Points: "so expensive", "slow workflow", "api limits"
+   - Features: "real-time analytics", "dark mode"
+   - Monetization: "pricing tier", "subscription fatigue"
+   - Tools/Competitors: "Notion vs Obsidian", "Salesforce alternative"
+   - Ecosystem: "#SaaS", "#BuildingInPublic", "#IndieHackers"
+
+## EXAMPLES:
+
+Input: "AI-powered calendar and scheduling tool"
+Good Output: [
+    "calendar blocking apps", "meeting overload", "scheduling nightmare"
+]
+
+ALWAYS use the generate_social_keywords tool."""
+
+# Tool definition for social keyword generation
+SOCIAL_KEYWORD_GENERATION_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "generate_social_keywords",
+        "description": "Generate social media search keywords for market research.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "keywords": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "3 search terms/hashtags/phrases used by real users on social media.",
+                    "minItems": 3,
+                    "maxItems": 3
+                },
+                "target_description": {
+                    "type": "string",
+                    "description": "Short summary of the topic for context."
+                }
+            },
+            "required": ["keywords", "target_description"],
+            "additionalProperties": False
+        }
+    }
+}
+
+
 class KeywordGenerator:
     """
     Service for generating search keywords using Liara AI with forced tool calling.
@@ -179,10 +235,56 @@ Use the generate_keywords tool to output 8-12 industry-specific search terms."""
             'target_description': target_description
         }
 
+    def generate_social_keywords(self, project_inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Generate social media keywords (Twitter/X) using AI.
+        """
+        # Build user message with project inputs
+        user_message = f"""Analyze this startup and generate SOCIAL MEDIA search keywords using the generate_social_keywords tool:
+
+STARTUP INFORMATION:
+- Name: {project_inputs.get('startup_name', 'N/A')}
+- Description: {project_inputs.get('startup_description', 'N/A')}
+- Target Audience: {project_inputs.get('target_audience', 'N/A')}
+- Research Goal: {project_inputs.get('research_goal', 'Topic research')}
+
+Generate exactly 3 informal, conversational, and hashtag-based keywords."""
+
+        logger.info("🔑 Calling Liara AI for social keywords...")
+        
+        response = self.client.chat.completions.create(
+            model=LIARA_MODEL,
+            messages=[
+                {"role": "system", "content": SOCIAL_KEYWORD_AI_SYSTEM_PROMPT},
+                {"role": "user", "content": user_message}
+            ],
+            tools=[SOCIAL_KEYWORD_GENERATION_TOOL],
+            tool_choice={"type": "function", "function": {"name": "generate_social_keywords"}},
+            temperature=0.8,
+            max_tokens=1000
+        )
+        
+        if not response.choices or not response.choices[0].message.tool_calls:
+            raise Exception("AI did not call generate_social_keywords")
+            
+        tool_call = response.choices[0].message.tool_calls[0]
+        try:
+            arguments = json.loads(tool_call.function.arguments)
+        except:
+            raise Exception("Failed to parse tool arguments")
+            
+        keywords = arguments.get('keywords', [])
+        target_description = arguments.get('target_description', '')
+        
+        return {
+            'keywords': keywords,
+            'target_description': target_description
+        }
+
 
 # Async wrapper for use in async contexts
 async def generate_keywords_async(project_inputs: Dict[str, Any]) -> Dict[str, Any]:
-    """Async wrapper for keyword generation."""
+    """Async wrapper for CRUD keyword generation."""
     import asyncio
     from functools import partial
     
@@ -191,4 +293,16 @@ async def generate_keywords_async(project_inputs: Dict[str, Any]) -> Dict[str, A
     return await loop.run_in_executor(
         None,
         partial(generator.generate, project_inputs)
+    )
+
+async def generate_social_keywords_async(project_inputs: Dict[str, Any]) -> Dict[str, Any]:
+    """Async wrapper for social keyword generation."""
+    import asyncio
+    from functools import partial
+    
+    generator = KeywordGenerator()
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        None,
+        partial(generator.generate_social_keywords, project_inputs)
     )

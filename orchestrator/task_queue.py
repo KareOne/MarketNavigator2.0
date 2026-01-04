@@ -225,8 +225,14 @@ class TaskQueue:
         if not task:
             return False
         
-        if task.status in ("running", "completed", "failed"):
+        if task.status in ("completed", "failed", "cancelled"):
             return False
+            
+        # If running, we can still force cancel
+        if task.status == "running":
+            is_force_cancel = True
+        else:
+            is_force_cancel = False
         
         # Remove from queue
         queue_key = f"{self.QUEUE_KEY}:{task.api_type}"
@@ -264,6 +270,41 @@ class TaskQueue:
             }
         
         return stats
+
+    async def clear_pending(self, api_type: str) -> int:
+        """
+        Clear all pending tasks for a specific API type.
+        
+        Args:
+            api_type: API type to clear tasks for
+            
+        Returns:
+            Number of tasks removed
+        """
+        queue_key = f"{self.QUEUE_KEY}:{api_type}"
+        
+        # Get all task IDs in queue
+        task_ids = await self.redis.zrange(queue_key, 0, -1)
+        
+        if not task_ids:
+            return 0
+        
+        # Remove from queue
+        await self.redis.delete(queue_key)
+        
+        # Mark all as cancelled
+        count = 0
+        for task_id in task_ids:
+            task = await self.get_task(task_id)
+            if task:
+                task.status = "cancelled"
+                task.completed_at = datetime.utcnow()
+                task.error = "Manually cleared by admin"
+                await self._store_task(task)
+                count += 1
+                
+        logger.info(f"🧹 Cleared {count} pending tasks for {api_type}")
+        return count
     
     # =========================================================================
     # Private methods

@@ -6,6 +6,7 @@ from .views import (
     OrchestratorHealthView,
     OrchestratorWorkersView,
     OrchestratorQueueView,
+    OrchestratorClearQueueView,
     OrchestratorWorkerStatsView,
     OrchestratorTestTaskView,
     # Enrichment views
@@ -28,6 +29,7 @@ urlpatterns = [
     path('orchestrator/health/', OrchestratorHealthView.as_view(), name='orchestrator-health'),
     path('orchestrator/workers/', OrchestratorWorkersView.as_view(), name='orchestrator-workers'),
     path('orchestrator/queue/', OrchestratorQueueView.as_view(), name='orchestrator-queue'),
+    path('orchestrator/queue/clear/', OrchestratorClearQueueView.as_view(), name='orchestrator-clear-queue'),
     path('orchestrator/workers/<str:api_type>/stats/', OrchestratorWorkerStatsView.as_view(), name='orchestrator-worker-stats'),
     path('orchestrator/test-task/', OrchestratorTestTaskView.as_view(), name='orchestrator-test-task'),
     

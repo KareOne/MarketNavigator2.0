@@ -122,7 +122,8 @@ class ReportStorageService:
         section_type: str,
         content: str,
         company_name: Optional[str] = None,
-        metadata: Optional[Dict] = None
+        metadata: Optional[Dict] = None,
+        report_type: str = 'crunchbase'
     ) -> str:
         """
         Save an AI analysis section response to S3.
@@ -135,11 +136,12 @@ class ReportStorageService:
             content: AI-generated content (markdown)
             company_name: Company name for per-company sections
             metadata: Optional metadata (processing time, model used, etc.)
+            report_type: Type of report (crunchbase, social, etc.)
         
         Returns:
             S3 key of saved file
         """
-        base_path = self._get_base_path(org_id, project_id, 'crunchbase', version)
+        base_path = self._get_base_path(org_id, project_id, report_type, version)
         
         data = {
             'section_type': section_type,
@@ -173,7 +175,8 @@ class ReportStorageService:
         version: int, 
         summary_type: str,
         content: str,
-        metadata: Optional[Dict] = None
+        metadata: Optional[Dict] = None,
+        report_type: str = 'crunchbase'
     ) -> str:
         """
         Save an executive summary AI response to S3.
@@ -185,11 +188,12 @@ class ReportStorageService:
             summary_type: Type of summary (tech_product_summary, etc.)
             content: AI-generated content (markdown)
             metadata: Optional metadata
+            report_type: Type of report (crunchbase, social, etc.)
         
         Returns:
             S3 key of saved file
         """
-        base_path = self._get_base_path(org_id, project_id, 'crunchbase', version)
+        base_path = self._get_base_path(org_id, project_id, report_type, version)
         
         data = {
             'summary_type': summary_type,
@@ -208,7 +212,8 @@ class ReportStorageService:
         project_id: str,
         org_id: str,
         version: int, 
-        metadata: Dict[str, Any]
+        metadata: Dict[str, Any],
+        report_type: str = 'crunchbase'
     ) -> str:
         """
         Save report metadata to S3.
@@ -217,17 +222,13 @@ class ReportStorageService:
             project_id: UUID of the project
             org_id: UUID of the organization
             version: Report version number
-            metadata: Dictionary containing report metadata:
-                - keywords: Search keywords used
-                - company_count: Number of companies analyzed
-                - processing_time: Total processing time
-                - generated_at: Timestamp
-                - model: AI model used
+            metadata: Dictionary containing report metadata
+            report_type: Type of report (crunchbase, social, etc.)
         
         Returns:
             S3 key of saved file
         """
-        base_path = self._get_base_path(org_id, project_id, 'crunchbase', version)
+        base_path = self._get_base_path(org_id, project_id, report_type, version)
         key = f"{base_path}/metadata.json"
         
         metadata['saved_at'] = datetime.utcnow().isoformat()
@@ -291,6 +292,27 @@ class ReportStorageService:
         key = f"{base_path}/{file_path}"
         return self.storage.get_presigned_url(key, expiration)
     
+    def save_twitter_raw_data(
+        self,
+        project_id: str,
+        org_id: str,
+        version: int,
+        raw_data: List[Dict[str, Any]]
+    ) -> str:
+        """
+        Save raw Twitter API response/tweets to S3.
+        """
+        base_path = self._get_base_path(org_id, project_id, 'social', version)
+        key = f"{base_path}/raw_data.json"
+        
+        data = {
+            'tweets': raw_data,
+            'count': len(raw_data),
+            'saved_at': datetime.utcnow().isoformat()
+        }
+        
+        return self._upload_json(key, data, {'type': 'raw_data', 'version': str(version)})
+
     def get_all_sections(
         self,
         project_id: str,
@@ -300,18 +322,6 @@ class ReportStorageService:
     ) -> Dict[str, Any]:
         """
         Get all analysis sections for a report from S3.
-        
-        Returns structured data for frontend rendering:
-        {
-            'metadata': {...},
-            'sections': [
-                {'id': 'overview', 'title': 'Company Overview', 'type': 'overview', 'content': '...'},
-                {'id': 'tech-product', 'title': 'Technology & Product', 'type': 'company', 
-                 'companies': [{'name': '...', 'content': '...'}]},
-                ...
-                {'id': 'tech-product-summary', 'title': 'Technology Summary', 'type': 'summary', 'content': '...'},
-            ]
-        }
         """
         base_path = self._get_base_path(org_id, project_id, report_type, version)
         logger.info(f"📂 get_all_sections: base_path = {base_path}")
@@ -331,68 +341,107 @@ class ReportStorageService:
         else:
             logger.warning(f"   ❌ No metadata found")
         
-        # Get company overview
-        overview_key = f"{base_path}/analysis/company_overview.json"
-        logger.info(f"   Looking for overview: {overview_key}")
-        overview = self._download_json(overview_key)
-        if overview:
-            result['sections'].append({
-                'id': 'overview',
-                'title': '📊 Company Overview',
-                'type': 'overview',
-                'content': overview.get('content', '')
-            })
-            logger.info(f"   ✅ Found company overview")
-        
-        # Per-company section types and their labels
-        section_types = [
-            ('tech_product', '💻 Technology & Product'),
-            ('market_demand', '📈 Market Demand & Web Insights'),
-            ('competitor', '🎯 Competitor Identification'),
-            ('market_funding', '💰 Market & Funding Insights'),
-            ('growth_potential', '🚀 Growth Potential'),
-            ('swot', '⚖️ SWOT Analysis'),
-        ]
-        
-        # Get per-company analyses
-        for section_type, title in section_types:
-            # List files in the section directory
-            section_prefix = f"{base_path}/analysis/{section_type}/"
-            logger.info(f"   Looking for {section_type} files: {section_prefix}")
-            files = self.storage.list_files(prefix=section_prefix)
-            logger.info(f"   Found {len(files)} files for {section_type}")
-            
-            companies = []
-            for f in files:
-                if f['Key'].endswith('.json'):
-                    company_data = self._download_json(f['Key'])
-                    if company_data:
-                        companies.append({
-                            'name': company_data.get('company_name', 'Unknown'),
-                            'content': company_data.get('content', '')
-                        })
-            
-            if companies:
-                section_id = section_type.replace('_', '-')
+        # Get company overview (Crunchbase specific, but harmless to check or skip)
+        if report_type == 'crunchbase':
+            overview_key = f"{base_path}/analysis/company_overview.json"
+            overview = self._download_json(overview_key)
+            if overview:
                 result['sections'].append({
-                    'id': section_id,
-                    'title': title,
-                    'type': 'company',
-                    'companies': companies
+                    'id': 'overview',
+                    'title': '📊 Company Overview',
+                    'type': 'overview',
+                    'content': overview.get('content', '')
                 })
-                logger.info(f"   ✅ Added {len(companies)} companies to {section_type}")
         
-        # Summary types and their labels
-        summary_types = [
-            ('tech_product_summary', '💻 Technology & Product Summary'),
-            ('market_demand_summary', '📈 Market Demand Summary'),
-            ('competitor_summary', '🎯 Competitor Summary'),
-            ('market_funding_summary', '💰 Funding Summary'),
-            ('growth_potential_summary', '🚀 Growth Summary'),
-            ('swot_summary', '⚖️ SWOT Summary'),
-        ]
+        # Define sections based on report type
+        if report_type == 'crunchbase':
+            section_types = [
+                ('tech_product', '💻 Technology & Product'),
+                ('market_demand', '📈 Market Demand & Web Insights'),
+                ('competitor', '🎯 Competitor Identification'),
+                ('market_funding', '💰 Market & Funding Insights'),
+                ('growth_potential', '🚀 Growth Potential'),
+                ('swot', '⚖️ SWOT Analysis'),
+            ]
+            summary_types = [
+                ('tech_product_summary', '💻 Technology & Product Summary'),
+                ('market_demand_summary', '📈 Market Demand Summary'),
+                ('competitor_summary', '🎯 Competitor Summary'),
+                ('market_funding_summary', '💰 Funding Summary'),
+                ('growth_potential_summary', '🚀 Growth Summary'),
+                ('swot_summary', '⚖️ SWOT Summary'),
+            ]
+        elif report_type == 'social':
+            section_types = [
+                ('market_segmentation', '👥 Market Segmentation'),
+                ('jtbd', '🔨 Jobs to be Done'),
+                ('pain_points', '😫 Pain Points & Frustrations'),
+                ('willingness_to_pay', '💸 Willingness to Pay'),
+                ('competitive_landscape', '⚔️ Competitive Landscape'),
+                ('sentiment', '❤️ Sentiment Analysis'),
+            ]
+            # Social report currently stores Executive Summary as a regular section or summary?
+            # In `tasks.py` I saved 'executive_summary' as a section, but `TwitterAnalysisPipeline` returns it in `analysis_results`.
+            # I should create a mapping for it.
+            summary_types = [] 
+            # Note: In tasks.py I saved everything via loop over `analysis_results`. 
+            # `results['executive_summary']` was added to the dict.
+            # So `executive_summary` is treated as a section type.
+            # I'll add it to section_types or handle it separately.
+            section_types.append(('executive_summary', '📝 Executive Summary'))
+
+        elif report_type == 'tracxn':
+             # Placeholder for Tracxn sections if needed, assuming similarity to CB
+             section_types = []
+             summary_types = []
+        else:
+            section_types = []
+            summary_types = []
         
-        # Get executive summaries
+        # Get analysis sections
+        for section_type, title in section_types:
+            # For Social, we saved them as single files (no company subdirs), unless I logic change in tasks.py
+            # In tasks.py: `section_type=key, content=content`.
+            # `save_analysis_section` implementation:
+            # if `company_name` is None: `key = f"{base_path}/analysis/{section_type}.json"` (Fallback)
+            # So for Social, they are single files.
+            
+            # Check for single file first
+            key = f"{base_path}/analysis/{section_type}.json"
+            data = self._download_json(key)
+            if data:
+                 result['sections'].append({
+                    'id': section_type.replace('_', '-'),
+                    'title': title,
+                    'type': 'section', # Generic type
+                    'content': data.get('content', '')
+                })
+                 continue
+
+            # Check for subdirectories (Per Company) - mostly for Crunchbase
+            if report_type == 'crunchbase':
+                section_prefix = f"{base_path}/analysis/{section_type}/"
+                files = self.storage.list_files(prefix=section_prefix)
+                companies = []
+                for f in files:
+                    if f['Key'].endswith('.json'):
+                        company_data = self._download_json(f['Key'])
+                        if company_data:
+                            companies.append({
+                                'name': company_data.get('company_name', 'Unknown'),
+                                'content': company_data.get('content', '')
+                            })
+                
+                if companies:
+                    section_id = section_type.replace('_', '-')
+                    result['sections'].append({
+                        'id': section_id,
+                        'title': title,
+                        'type': 'company',
+                        'companies': companies
+                    })
+        
+        # Get summaries (mostly for Crunchbase)
         for summary_type, title in summary_types:
             summary_key = f"{base_path}/analysis/summaries/{summary_type}.json"
             summary = self._download_json(summary_key)

@@ -74,6 +74,12 @@ class TimeEstimator:
             'html_gen': 5,
             'save': 3,
         },
+        'social': {
+            'init': 5,
+            'api_search': 120,
+            'analysis': 180,
+            'save': 5,
+        },
         'pitch_deck': {
             'init': 5,
             'gather_data': 10,

@@ -1162,6 +1162,34 @@ export default function AdminPage() {
                                                 }}>
                                                     {pending}
                                                 </span>
+                                                {pending > 0 && (
+                                                    <button
+                                                        onClick={async () => {
+                                                            if (!confirm(`Are you sure you want to clear ${pending} pending tasks for ${apiType}?`)) return;
+                                                            try {
+                                                                await fetch(`${API_URL}/api/admin/orchestrator/queue/clear/?api_type=${apiType}`, {
+                                                                    method: "DELETE",
+                                                                    headers: { Authorization: `Bearer ${token}` },
+                                                                });
+                                                                fetchOrchestratorData();
+                                                            } catch (err) {
+                                                                console.error("Failed to clear queue:", err);
+                                                                alert("Failed to clear queue");
+                                                            }
+                                                        }}
+                                                        style={{
+                                                            background: "none",
+                                                            border: "none",
+                                                            color: "#ef4444",
+                                                            fontSize: "11px",
+                                                            cursor: "pointer",
+                                                            textDecoration: "underline",
+                                                            padding: 0
+                                                        }}
+                                                    >
+                                                        Clear
+                                                    </button>
+                                                )}
                                             </div>
                                         </div>
                                     );
@@ -1250,9 +1278,39 @@ export default function AdminPage() {
                                                         </td>
                                                         <td style={{ padding: "14px 16px", color: "var(--color-text-muted)", fontSize: "13px" }}>
                                                             {worker.current_task_id ? (
-                                                                <code style={{ fontSize: "11px", color: "#eab308" }}>
-                                                                    {worker.current_task_id.substring(0, 12)}...
-                                                                </code>
+                                                                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                                                    <code style={{ fontSize: "11px", color: "#eab308" }}>
+                                                                        {worker.current_task_id.substring(0, 8)}...
+                                                                    </code>
+                                                                    <button
+                                                                        onClick={async () => {
+                                                                            if (!confirm(`Are you sure you want to STOP this task?`)) return;
+                                                                            try {
+                                                                                await fetch(`${API_URL}/api/admin/orchestrator/queue/clear/?task_id=${worker.current_task_id}`, {
+                                                                                    method: "DELETE",
+                                                                                    headers: { Authorization: `Bearer ${token}` },
+                                                                                });
+                                                                                fetchOrchestratorData();
+                                                                            } catch (err) {
+                                                                                console.error("Failed to stop task:", err);
+                                                                                alert("Failed to stop task");
+                                                                            }
+                                                                        }}
+                                                                        title="Force Stop Task"
+                                                                        style={{
+                                                                            background: "rgba(239, 68, 68, 0.1)",
+                                                                            border: "1px solid rgba(239, 68, 68, 0.2)",
+                                                                            borderRadius: "4px",
+                                                                            color: "#ef4444",
+                                                                            cursor: "pointer",
+                                                                            fontSize: "10px",
+                                                                            padding: "2px 6px",
+                                                                            lineHeight: 1
+                                                                        }}
+                                                                    >
+                                                                        STOP
+                                                                    </button>
+                                                                </div>
                                                             ) : "—"}
                                                         </td>
                                                         <td style={{ padding: "14px 16px", color: "var(--color-text-muted)", fontSize: "13px" }}>
