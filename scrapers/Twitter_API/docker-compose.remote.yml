@@ -15,7 +15,7 @@ services:
       - .:/app
     environment:
       # Status callbacks go to worker_agent which relays via WebSocket to orchestrator
-      STATUS_CALLBACK_URL: http://worker_agent:9099
+      STATUS_CALLBACK_URL: http://worker_agent:9098
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8004/health" ]
       interval: 10s
@@ -35,7 +35,7 @@ services:
     # No sleep needed - agent waits for local API to be ready before connecting
     command: python agent.py
     ports:
-      - "9099:9099" # Status proxy port (internal use only)
+      - "9098:9098" # Status proxy port (internal use only)
     env_file:
       - .env.remote
     environment:

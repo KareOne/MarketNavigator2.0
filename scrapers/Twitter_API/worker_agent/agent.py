@@ -535,7 +535,7 @@ class StatusProxyServer:
     and relays them via the worker agent's WebSocket connection.
     """
     
-    def __init__(self, agent: WorkerAgent, port: int = 9099):
+    def __init__(self, agent: WorkerAgent, port: int = 9098):
         self.agent = agent
         self.port = port
         self._server = None
@@ -602,7 +602,7 @@ async def main():
     agent = WorkerAgent()
     
     # Start status proxy server
-    status_proxy = StatusProxyServer(agent, port=9099)
+    status_proxy = StatusProxyServer(agent, port=9098)
     await status_proxy.start()
     
     # Start the agent
