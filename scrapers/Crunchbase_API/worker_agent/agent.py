@@ -439,6 +439,7 @@ class WorkerAgent:
             "search_with_rank": "/search/crunchbase/top-similar-with-rank",
             "search_similar": "/search/crunchbase/top-similar",
             "search_batch": "/search/crunchbase/batch",
+            "enrich": "/search/crunchbase/batch",  # Enrichment uses batch endpoint
             
             # Tracxn endpoints
             "tracxn_search_with_rank": "/scrape-batch-api-with-rank",

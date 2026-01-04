@@ -375,7 +375,12 @@ async def worker_websocket(websocket: WebSocket):
                     
                     # Notify enrichment manager if this was an enrichment task
                     if task and task.source == "enrichment":
-                        await enrichment_manager.on_task_complete(task_id, result)
+                        # Merge enrichment_keyword_id from original payload into result
+                        enrichment_result = {
+                            **result,
+                            "enrichment_keyword_id": task.payload.get("enrichment_keyword_id")
+                        }
+                        await enrichment_manager.on_task_complete(task_id, enrichment_result)
                     
                     # Signal for next task
                     task_queue._assignment_event.set()

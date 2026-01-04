@@ -169,7 +169,8 @@ class EnrichmentManager:
             action="enrich",
             report_id=f"enrichment-{keyword_id}",
             payload={
-                "keyword": keyword_text,
+                # Batch endpoint expects 'keywords' as a list
+                "keywords": [keyword_text],
                 "num_companies": num_companies,
                 "days_threshold": self.DAYS_THRESHOLD,
                 "enrichment_keyword_id": keyword_id,
@@ -213,13 +214,22 @@ class EnrichmentManager:
         if not keyword_id:
             return
         
+        # Extract data from batch endpoint response format
+        # Batch response: {"results": [...], "summary": {...}}
+        summary = result.get("summary", {})
+        results = result.get("results", [])
+        
+        # Count companies from results
+        companies_found = summary.get("total_companies_found", 0)
+        companies_scraped = sum(r.get("count", 0) for r in results if r.get("status") == "success")
+        
         await self._notify_backend(
             keyword_id,
             'complete',
             task_id=task_id,
-            companies_found=result.get("companies_found", 0),
-            companies_scraped=result.get("companies_scraped", 0),
-            companies_skipped=result.get("companies_skipped", 0)
+            companies_found=companies_found,
+            companies_scraped=companies_scraped,
+            companies_skipped=0  # Batch endpoint doesn't track skipped
         )
         
         if task_id == self._current_enrichment_task_id:
