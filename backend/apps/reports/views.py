@@ -398,6 +398,8 @@ class ReportViewSet(viewsets.ReadOnlyModelViewSet):
             )
 
 
+from rest_framework.throttling import ScopedRateThrottle
+
 class StatusUpdateView(APIView):
     """
     Internal API endpoint for receiving real-time status updates from crunchbase_api.
@@ -405,6 +407,7 @@ class StatusUpdateView(APIView):
     No authentication required since it's internal container-to-container communication.
     """
     permission_classes = [AllowAny]  # Internal API, no auth needed
+    throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'status_updates'
     
     def post(self, request):

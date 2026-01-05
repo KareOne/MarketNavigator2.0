@@ -8,6 +8,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
+from rest_framework.throttling import ScopedRateThrottle
 
 logger = logging.getLogger(__name__)
 
@@ -504,6 +505,7 @@ class EnrichmentCallbackView(APIView):
     Called when an enrichment task starts, completes, or fails.
     """
     permission_classes = []  # No auth required - internal call from orchestrator
+    throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'status_updates'
     
     def post(self, request):
@@ -605,6 +607,7 @@ class EnrichmentInternalStatusView(APIView):
     Returns minimal status info needed for enrichment dispatch decisions.
     """
     permission_classes = []  # No auth - internal use only
+    throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'status_updates'
     
     def get(self, request):
@@ -624,6 +627,7 @@ class EnrichmentInternalKeywordsView(APIView):
     Returns pending keywords ordered by priority.
     """
     permission_classes = []  # No auth - internal use only
+    throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'status_updates'
     
     def get(self, request):
