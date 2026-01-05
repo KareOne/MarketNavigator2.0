@@ -18,7 +18,21 @@ from asgiref.sync import async_to_sync
 import asyncio
 import logging
 
+import logging
+import functools
+from django.db import close_old_connections
+
 logger = logging.getLogger(__name__)
+
+def close_db_wrapper(func):
+    """Decorator to ensure DB connections are closed after task execution."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        finally:
+            close_old_connections()
+    return wrapper
 
 
 def send_progress_update(project_id, report_type, progress, current_step):
@@ -67,6 +81,7 @@ def get_project_inputs_dict(inputs):
     }
 
 @shared_task(bind=True, queue='reports')
+@close_db_wrapper
 def generate_crunchbase_report(self, report_id, user_id):
     """
     Generate Crunchbase analysis report using 13-step MVP pipeline.
@@ -443,6 +458,9 @@ def generate_crunchbase_report(self, report_id, user_id):
                         })
                 
                 await complete_step(step_key, {'companies_analyzed': len(per_company[step_key])})
+                
+                # Close DB connections after each big analysis chunk
+                await sync_to_async(close_old_connections)()
             
             # Step 10: Executive Summaries
             await start_step('summaries')

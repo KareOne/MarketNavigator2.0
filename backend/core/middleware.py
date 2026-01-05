@@ -11,6 +11,24 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 
+class DatabaseCleanupMiddleware:
+    """
+    Middleware to ensure database connections are closed after request.
+    Critical for preventing connection pool exhaustion in async/threaded environments.
+    """
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        response = self.get_response(request)
+        
+        # Force close old connections to prevent zombies
+        from django.db import close_old_connections
+        close_old_connections()
+        
+        return response
+
+
 class AuditMiddleware:
     """
     Middleware for audit logging and API usage tracking.

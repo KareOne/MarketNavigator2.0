@@ -428,16 +428,16 @@ class TracxnBot:
             # Parse response
             data = response.json()
             
-            # Save API response to JSON file for debugging
-            try:
-                os.makedirs("api_responses", exist_ok=True)
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                response_file = f"api_responses/api_response_{query.replace(' ', '_')}_{timestamp}.json"
-                with open(response_file, 'w', encoding='utf-8') as f:
-                    json.dump(data, f, indent=2, ensure_ascii=False)
-                self.log.info(f"API response saved to: {response_file}")
-            except Exception as e:
-                self.log.warning(f"Failed to save API response to file: {e}")
+            # API response saving disabled per user request
+            # try:
+            #     os.makedirs("api_responses", exist_ok=True)
+            #     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            #     response_file = f"api_responses/api_response_{query.replace(' ', '_')}_{timestamp}.json"
+            #     with open(response_file, 'w', encoding='utf-8') as f:
+            #         json.dump(data, f, indent=2, ensure_ascii=False)
+            #     self.log.info(f"API response saved to: {response_file}")
+            # except Exception as e:
+            #     self.log.warning(f"Failed to save API response to file: {e}")
             
             self.log.info(f"API Response JSON keys: {list(data.keys())}")
             

@@ -68,3 +68,8 @@ nginx/ssl/*.pem
 # Remove these lines if you want to exclude them:
 # .env
 # .env.*
+
+# Tracxn Scraper Cache
+scrapers/Tracxn_API/audio_cache/
+scrapers/Tracxn_API/image_cache/
+scrapers/Tracxn_API/api_responses/

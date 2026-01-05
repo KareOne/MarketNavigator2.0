@@ -61,6 +61,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'core.middleware.AuditMiddleware',  # Custom audit logging
+    'core.middleware.DatabaseCleanupMiddleware',  # Ensure DB connections are closed
 ]
 
 ROOT_URLCONF = 'config.urls'
@@ -97,8 +98,8 @@ DATABASES = {
         'HOST': os.getenv('DB_HOST', 'localhost'),
         'PORT': os.getenv('DB_PORT', '5432'),
         'POOL_OPTIONS': {
-            'POOL_SIZE': 20,  # Min connections (increased for production load)
-            'MAX_OVERFLOW': 40,  # Additional connections under load (60 total max)
+            'POOL_SIZE': 5,  # Reduced to prevent connection exhaustion
+            'MAX_OVERFLOW': 10,  # Max 15 connections per container
             'RECYCLE': 120,  # Recycle connections after 2 minutes (shorter for cloud DB)
             'PRE_PING': True,  # Verify connection before use
             'POOL_TIMEOUT': 30,  # Wait max 30s for connection from pool

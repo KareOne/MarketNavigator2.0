@@ -288,7 +288,10 @@ class WorkerAgent:
                 msg_type = data.get("type")
                 
                 if msg_type == "task":
-                    await self._handle_task(data)
+                    # Run task in background so heartbeat and pings can still be processed
+                    # AND so that if connection drops, we can detect it in this loop and reconnect
+                    # while the task continues running.
+                    asyncio.create_task(self._handle_task(data))
                 elif msg_type == "ping":
                     # Server ping to keep connection alive - respond with pong
                     try:
