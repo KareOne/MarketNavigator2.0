@@ -118,6 +118,7 @@ const INPUT_FIELDS = [
     { key: "business_model", label: "Business Model", placeholder: "How do you make money?" },
     { key: "geographic_focus", label: "Geographic Focus", placeholder: "Target regions" },
     { key: "research_goal", label: "Research Goal", placeholder: "What do you want to learn?", multiline: true },
+    { key: "time_range", label: "Time Range", placeholder: "e.g., Last 5 years, 2020-2024" },
     { key: "inspiration_sources", label: "Competitors", placeholder: "Stripe, Square, etc." },
 ];
 

@@ -68,11 +68,20 @@ class TimeEstimator:
             'save': 3,
         },
         'tracxn': {
-            'init': 3,
-            'api_search': 180,
-            'data_parse': 10,
-            'html_gen': 5,
-            'save': 3,
+            'init': 5,
+            'api_search': 180,          # Tracxn API search is slower
+            'sorting': 10,
+            'fetching_details': 60,     # Full data scraping
+            'company_overview': 30,
+            'tech_product': 90,
+            'market_demand': 90,
+            'competitor': 90,
+            'market_funding': 90,
+            'growth_potential': 90,
+            'swot': 90,
+            'summaries': 120,           # Multiple summaries (7 total)
+            'html_gen': 10,
+            'save': 5,
         },
         'social': {
             'init': 5,

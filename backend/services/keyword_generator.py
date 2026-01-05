@@ -134,6 +134,97 @@ SOCIAL_KEYWORD_GENERATION_TOOL = {
 }
 
 
+# Tracxn Keyword Generation Prompt
+TRACXN_KEYWORD_AI_SYSTEM_PROMPT = """You are a specialized Keyword Generation AI for Tracxn startup/investor research.
+
+YOUR JOB: Analyze startup information and generate targeted search keywords to find similar startups on Tracxn platform.
+
+## CRITICAL KEYWORD FORMAT RULES:
+1. YOU MUST ALWAYS call the generate_tracxn_keywords tool.
+2. Generate 5-10 diverse keyword combinations.
+3. **For multi-word searches, connect words with ' AND '** (e.g., 'AI AND Storytelling', NOT 'AI Storytelling')
+4. Single words can be used as-is (e.g., 'fintech', 'healthcare')
+5. The AND operator ensures companies match ALL specified terms.
+
+## EXAMPLES:
+
+Input: "AI storytelling startup for content creators"
+Good Output: [
+    "AI AND Storytelling",
+    "Generative AND AI",
+    "Digital AND Storytelling",
+    "Creative AND AI",
+    "Narrative AND Tech",
+    "Content AND Creation AND AI"
+]
+
+Input: "Pet services platform with AI features"
+Good Output: [
+    "Pet AND Care",
+    "Pet AND Products",
+    "AI AND for AND Pets",
+    "Pet AND Health",
+    "Pet AND Owners",
+    "Pet AND Technology"
+]
+
+Input: "Avatar video support B2B platform"
+Good Output: [
+    "AI AND Video",
+    "Avatar AND Video",
+    "Customer AND Support AND AI",
+    "Help AND Center AND Video",
+    "Knowledge AND Base",
+    "B2B AND Video AND Support"
+]
+
+Input: "AI-powered document processing for legal firms"
+Good Output: [
+    "Legal AND Tech",
+    "Document AND AI",
+    "Contract AND Analytics",
+    "Law AND Firm AND SaaS",
+    "Enterprise AND AI",
+    "RegTech"
+]
+
+## BAD EXAMPLES (DO NOT DO THIS):
+- "Legal Tech" ❌ (use "Legal AND Tech" ✅)
+- "Document AI" ❌ (use "Document AND AI" ✅)
+- "AI Storytelling" ❌ (use "AI AND Storytelling" ✅)
+
+Single words like 'fintech', 'healthcare', 'SaaS', 'RegTech' are OK as-is.
+
+ALWAYS use the generate_tracxn_keywords tool."""
+
+# Tool definition for Tracxn keyword generation
+TRACXN_KEYWORD_GENERATION_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "generate_tracxn_keywords",
+        "description": "Generate Tracxn-specific search keywords for startup research. Keywords must use ' AND ' between words for multi-word terms.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "keywords": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "5-10 Tracxn search keywords. Use ' AND ' between words for multi-word terms (e.g., 'AI AND Storytelling', 'Pet AND Care', 'Customer AND Support AND AI'). Single words like 'fintech' can be used as-is.",
+                    "minItems": 5,
+                    "maxItems": 10
+                },
+                "target_description": {
+                    "type": "string",
+                    "description": "Startup description for similarity matching with focus on sector, technology, and target market."
+                }
+            },
+            "required": ["keywords", "target_description"],
+            "additionalProperties": False
+        }
+    }
+}
+
+
 class KeywordGenerator:
     """
     Service for generating search keywords using Liara AI with forced tool calling.
@@ -281,6 +372,71 @@ Generate exactly 3 informal, conversational, and hashtag-based keywords."""
             'target_description': target_description
         }
 
+    def generate_tracxn_keywords(self, project_inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Generate Tracxn-specific keywords using AI.
+        Uses startup ecosystem terminology for better Tracxn search results.
+        """
+        # Build user message with project inputs
+        user_message = f"""Analyze this startup and generate TRACXN search keywords using the generate_tracxn_keywords tool:
+
+STARTUP INFORMATION:
+- Name: {project_inputs.get('startup_name', 'N/A')}
+- Description: {project_inputs.get('startup_description', 'N/A')}
+- Target Audience: {project_inputs.get('target_audience', 'N/A')}
+- Business Model: {project_inputs.get('business_model', 'N/A')}
+- Current Stage: {project_inputs.get('current_stage', 'N/A')}
+- Geographic Focus: {project_inputs.get('geographic_focus', 'N/A')}
+- Research Goal: {project_inputs.get('research_goal', 'Find similar startups')}
+- Competitors/Inspiration: {project_inputs.get('inspiration_sources', 'N/A')}
+
+IMPORTANT: Generate 5-10 keyword combinations.
+- For multi-word searches, use ' AND ' between words (e.g., 'AI AND Storytelling', 'Pet AND Care')
+- Single words like 'fintech' can be used as-is."""
+
+        logger.info("🔑 Calling Liara AI for Tracxn keywords...")
+        
+        response = self.client.chat.completions.create(
+            model=LIARA_MODEL,
+            messages=[
+                {"role": "system", "content": TRACXN_KEYWORD_AI_SYSTEM_PROMPT},
+                {"role": "user", "content": user_message}
+            ],
+            tools=[TRACXN_KEYWORD_GENERATION_TOOL],
+            tool_choice={"type": "function", "function": {"name": "generate_tracxn_keywords"}},
+            temperature=0.7,
+            max_tokens=1000
+        )
+        
+        if not response.choices or not response.choices[0].message.tool_calls:
+            raise Exception("AI did not call generate_tracxn_keywords")
+            
+        tool_call = response.choices[0].message.tool_calls[0]
+        
+        if tool_call.function.name != "generate_tracxn_keywords":
+            raise Exception(f"AI called wrong tool: {tool_call.function.name}")
+        
+        try:
+            arguments = json.loads(tool_call.function.arguments)
+        except json.JSONDecodeError as e:
+            raise Exception(f"Failed to parse tool arguments as JSON: {e}")
+            
+        keywords = arguments.get('keywords', [])
+        target_description = arguments.get('target_description', '')
+        
+        if not keywords or len(keywords) < 3:
+            raise Exception(f"AI generated insufficient keywords: {keywords}")
+        
+        # Log the keywords with format validation hint
+        logger.info(f"✅ AI generated {len(keywords)} Tracxn keywords: {keywords}")
+        logger.info(f"📝 Target description: {target_description[:100]}...")
+
+        
+        return {
+            'keywords': keywords[:12],  # Cap at 12
+            'target_description': target_description
+        }
+
 
 # Async wrapper for use in async contexts
 async def generate_keywords_async(project_inputs: Dict[str, Any]) -> Dict[str, Any]:
@@ -305,4 +461,16 @@ async def generate_social_keywords_async(project_inputs: Dict[str, Any]) -> Dict
     return await loop.run_in_executor(
         None,
         partial(generator.generate_social_keywords, project_inputs)
+    )
+
+async def generate_tracxn_keywords_async(project_inputs: Dict[str, Any]) -> Dict[str, Any]:
+    """Async wrapper for Tracxn keyword generation."""
+    import asyncio
+    from functools import partial
+    
+    generator = KeywordGenerator()
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        None,
+        partial(generator.generate_tracxn_keywords, project_inputs)
     )

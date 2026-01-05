@@ -50,7 +50,7 @@ EDITING_MODE_PROMPT = """You are in EDITING MODE. You have the ability to modify
 - business_model: How they make money
 - geographic_focus: Target markets/regions
 - research_goal: What they want to learn
-- time_range: 1mo, 3mo, 6mo, 1yr, or all
+- time_range: e.g. "Last month", "Last 5 years", "2020-2024", or "All time"
 - inspiration_sources: Similar companies/competitors
 
 Always confirm what you've saved after calling the function."""

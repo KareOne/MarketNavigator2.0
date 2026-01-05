@@ -49,8 +49,7 @@ Only include fields that were explicitly mentioned or can be clearly inferred fr
                 },
                 "time_range": {
                     "type": "string",
-                    "enum": ["1mo", "3mo", "6mo", "1yr", "all"],
-                    "description": "Time range for analysis: 1mo (last month), 3mo (last 3 months), 6mo (last 6 months), 1yr (last year), all (all time)"
+                    "description": "Time range for analysis (e.g., 'Last month', 'Last 5 years', '2020-2024', 'All time')"
                 },
                 "inspiration_sources": {
                     "type": "string",
@@ -211,7 +210,7 @@ Your primary job is to collect and UPDATE project information through the fill_p
 - business_model: How they make money
 - geographic_focus: Target markets/regions
 - research_goal: What they want to learn
-- time_range: 1mo, 3mo, 6mo, 1yr, or all
+- time_range: e.g. "Last month", "Last 5 years", "2020-2024", or "All time"
 - inspiration_sources: Similar companies/competitors
 
 **Current collected information:**

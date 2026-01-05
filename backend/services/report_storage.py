@@ -313,6 +313,62 @@ class ReportStorageService:
         
         return self._upload_json(key, data, {'type': 'raw_data', 'version': str(version)})
 
+    def save_tracxn_raw_data(
+        self,
+        project_id: str,
+        org_id: str,
+        version: int,
+        raw_data: List[Dict[str, Any]]
+    ) -> str:
+        """
+        Save raw Tracxn API response/company data to S3.
+        
+        Args:
+            project_id: UUID of the project
+            org_id: UUID of the organization
+            version: Report version number
+            raw_data: List of company dictionaries from Tracxn API
+            
+        Returns:
+            S3 key of saved file
+        """
+        base_path = self._get_base_path(org_id, project_id, 'tracxn', version)
+        key = f"{base_path}/raw_data.json"
+        
+        data = {
+            'companies': raw_data,
+            'count': len(raw_data),
+            'saved_at': datetime.utcnow().isoformat()
+        }
+        
+        return self._upload_json(key, data, {
+            'project_id': project_id,
+            'version': str(version),
+            'report_type': 'tracxn'
+        })
+    
+    def get_tracxn_raw_data(
+        self,
+        project_id: str,
+        org_id: str,
+        version: int
+    ) -> Optional[Dict[str, Any]]:
+        """Load the raw Tracxn data for a report from S3."""
+        base_path = self._get_base_path(org_id, project_id, 'tracxn', version)
+        key = f"{base_path}/raw_data.json"
+        return self._download_json(key)
+
+    def get_twitter_raw_data(
+        self,
+        project_id: str,
+        org_id: str,
+        version: int
+    ) -> Optional[Dict[str, Any]]:
+        """Load the raw Twitter/Social data for a report from S3."""
+        base_path = self._get_base_path(org_id, project_id, 'social', version)
+        key = f"{base_path}/raw_data.json"
+        return self._download_json(key)
+
     def get_all_sections(
         self,
         project_id: str,
@@ -391,9 +447,25 @@ class ReportStorageService:
             section_types.append(('executive_summary', '📝 Executive Summary'))
 
         elif report_type == 'tracxn':
-             # Placeholder for Tracxn sections if needed, assuming similarity to CB
-             section_types = []
-             summary_types = []
+            # Tracxn sections - matching 14-step pipeline
+            section_types = [
+                ('company_overview', '📊 Company Overview'),
+                ('tech_product', '💻 Technology & Product'),
+                ('market_demand', '📈 Market Demand & Traction'),
+                ('competitor', '🎯 Competitor Identification'),
+                ('market_funding', '💰 Funding Insights'),
+                ('growth_potential', '🚀 Growth Potential'),
+                ('swot', '⚖️ SWOT Analysis'),
+            ]
+            summary_types = [
+                ('company_overview_summary', '📊 Market Overview Summary'),
+                ('tech_product_summary', '💻 Technology Summary'),
+                ('market_demand_summary', '📈 Market Demand Summary'),
+                ('competitor_summary', '🎯 Competitor Summary'),
+                ('market_funding_summary', '💰 Funding Summary'),
+                ('growth_potential_summary', '🚀 Growth Summary'),
+                ('swot_summary', '⚖️ SWOT Summary'),
+            ]
         else:
             section_types = []
             summary_types = []
@@ -418,8 +490,8 @@ class ReportStorageService:
                 })
                  continue
 
-            # Check for subdirectories (Per Company) - mostly for Crunchbase
-            if report_type == 'crunchbase':
+            # Check for subdirectories (Per Company)
+            if report_type in ['crunchbase', 'tracxn']:
                 section_prefix = f"{base_path}/analysis/{section_type}/"
                 files = self.storage.list_files(prefix=section_prefix)
                 companies = []

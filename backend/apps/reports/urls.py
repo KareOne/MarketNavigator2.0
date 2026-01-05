@@ -23,6 +23,12 @@ urlpatterns = [
     path('project/<uuid:project_id>/<uuid:pk>/sections/', views.ReportViewSet.as_view({
         'get': 'sections',
     }), name='report-sections'),
+    path('project/<uuid:project_id>/<uuid:pk>/download-markdown/', views.ReportViewSet.as_view({
+        'get': 'download_markdown',
+    }), name='report-download-markdown'),
+    path('project/<uuid:project_id>/<uuid:pk>/download-raw-data/', views.ReportViewSet.as_view({
+        'get': 'download_raw_data',
+    }), name='report-download-raw-data'),
     # Internal API for crunchbase_api container to send status updates
     path('status-update/', views.StatusUpdateView.as_view(), name='report-status-update'),
 ]

@@ -233,7 +233,23 @@ def generate_crunchbase_report(self, report_id, user_id):
                         'target_description': target_description,
                     }
                 )
-                logger.info(f"✅ Saved Crunchbase raw data JSON for project {project.id}")
+                logger.info(f"✅ Saved raw Crunchbase data to S3")
+                
+                # Save to DB (Dual-Write)
+                from .models import ReportRawData
+                ReportRawData.objects.create(
+                    report=report,
+                    version=report.current_version + 1,
+                    report_type='crunchbase',
+                    data={
+                        'all_companies': all_companies,
+                        'top_companies': top_companies,
+                        'metadata': metadata,
+                        'keywords': keywords,
+                        'target_description': target_description,
+                    }
+                )
+                logger.info(f"✅ Saved raw Crunchbase data to DB")
             except Exception as e:
                 logger.warning(f"Failed to save Crunchbase raw data JSON: {e}")
             
@@ -788,6 +804,17 @@ def generate_social_report(self, report_id, user_id):
                     version=report.current_version + 1,
                     raw_data=all_tweets
                 )
+                logger.info(f"✅ Saved raw Twitter data to S3")
+                
+                # Save to DB (Dual-Write)
+                from .models import ReportRawData
+                ReportRawData.objects.create(
+                    report=report,
+                    version=report.current_version + 1,
+                    report_type='social',
+                    data=all_tweets
+                )
+                logger.info(f"✅ Saved raw Twitter data to DB")
             except Exception as e:
                 logger.warning(f"Failed to save raw Twitter data: {e}")
             
@@ -920,20 +947,24 @@ def generate_social_report(self, report_id, user_id):
 @shared_task(bind=True, queue='reports')
 def generate_tracxn_report(self, report_id, user_id):
     """
-    Generate Tracxn analysis report using 6-step AI pipeline.
+    Generate Tracxn analysis report using 14-step AI pipeline.
     Per FINAL_ARCHITECTURE - Panel 2: Tracxn Analysis
     
     Pipeline Steps:
-    1. Initialize & Generate Keywords
-    2. Search Tracxn API  
+    1. Initialize & Generate Tracxn Keywords
+    2. Search Tracxn API via Orchestrator
     3. Rank Results by Similarity
     4. Fetch Startup Details
-    5. Competitor Analysis (per startup)
-    6. Market & Funding Analysis (per startup)
-    7. Growth Potential Analysis (per startup)
-    8. Executive Summaries
-    9. Generate HTML Report
-    10. Save Report
+    5. Company Overview Analysis (per startup)
+    6. Technology & Product Analysis (per startup)
+    7. Market Demand Analysis (per startup)
+    8. Competitor Analysis (per startup)
+    9. Market & Funding Analysis (per startup)
+    10. Growth Potential Analysis (per startup)
+    11. SWOT Analysis (per startup)
+    12. Executive Summaries (7 summaries)
+    13. Generate HTML Report
+    14. Save Report to DB and S3
     """
     from .models import Report, ReportVersion, ReportAnalysisSection
     from .progress_tracker import ReportProgressTracker
@@ -965,15 +996,16 @@ def generate_tracxn_report(self, report_id, user_id):
         
         # Check if we need to generate keywords using AI
         if not inputs.extracted_keywords or len(inputs.extracted_keywords) == 0:
-            # Generate keywords using Liara AI - NO FALLBACK
+            # Generate Tracxn-specific keywords using Liara AI - NO FALLBACK
             from services.keyword_generator import KeywordGenerator
             
-            tracker.update_step_message('init', "Generating AI-powered search keywords...")
-            logger.info("🔑 Generating search keywords using Liara AI (forced tool calling)...")
+            tracker.update_step_message('init', "Generating AI-powered Tracxn search keywords...")
+            logger.info("🔑 Generating Tracxn keywords using Liara AI (forced tool calling)...")
             
             generator = KeywordGenerator()
             project_input_dict = get_project_inputs_dict(inputs)
-            search_params = generator.generate(project_input_dict)  # Will raise exception if fails
+            # Use Tracxn-specific keyword generation for better startup ecosystem terms
+            search_params = generator.generate_tracxn_keywords(project_input_dict)  # Will raise exception if fails
             
             keywords = search_params['keywords']
             target_description = search_params['target_description']
@@ -1043,6 +1075,30 @@ def generate_tracxn_report(self, report_id, user_id):
                 'all_companies_found': len(all_companies),
                 'top_companies': len(top_companies),
             })
+            
+            # Save raw data to S3/MinIO
+            try:
+                from services.report_storage import report_storage
+                org_id = str(project.organization_id) if project.organization_id else 'default'
+                report_storage.save_tracxn_raw_data(
+                    project_id=str(project.id),
+                    org_id=org_id,
+                    version=report.current_version + 1,
+                    raw_data=top_companies
+                )
+                logger.info(f"✅ Saved raw Tracxn data to S3")
+                
+                # Save to DB (Dual-Write)
+                from .models import ReportRawData
+                ReportRawData.objects.create(
+                    report=report,
+                    version=report.current_version + 1,
+                    report_type='tracxn',
+                    data=top_companies
+                )
+                logger.info(f"✅ Saved raw Tracxn data to DB")
+            except Exception as e:
+                logger.warning(f"Failed to save raw Tracxn data: {e}")
             
         except Exception as e:
             logger.warning(f"Tracxn scraper failed: {e}")
@@ -1232,63 +1288,82 @@ def generate_tracxn_report(self, report_id, user_id):
         # Save analysis sections to database
         section_order = 0
         
-        # Save competitor reports
-        for report_item in analysis_result['competitor_reports']:
-            ReportAnalysisSection.objects.create(
-                report=report,
-                section_type='competitor',
-                company_name=report_item['company_name'],
-                content_markdown=report_item['content'],
-                order=section_order
-            )
-            section_order += 1
+        # Save analysis sections (Dual-Write: DB + S3)
+        section_mapping = [
+            ('company_overview', 'company_overview_reports'),
+            ('tech_product', 'tech_product_reports'),
+            ('market_demand', 'market_demand_reports'),
+            ('competitor', 'competitor_reports'),
+            ('market_funding', 'market_funding_reports'),
+            ('growth_potential', 'growth_potential_reports'),
+            ('swot', 'swot_reports'),
+        ]
+
+        for section_type, result_key in section_mapping:
+            for report_item in analysis_result.get(result_key, []):
+                # 1. Save to DB
+                ReportAnalysisSection.objects.create(
+                    report=report,
+                    section_type=section_type,
+                    company_name=report_item['company_name'],
+                    content_markdown=report_item['content'],
+                    order=section_order
+                )
+                section_order += 1
+                
+                # 2. Save to S3
+                if getattr(settings, 'USE_S3', False):
+                    try:
+                        org_id = str(project.organization_id) if project.organization_id else 'default'
+                        report_storage.save_analysis_section(
+                            project_id=str(project.id),
+                            org_id=org_id,
+                            version=report.current_version + 1,
+                            section_type=section_type,
+                            content=report_item['content'],
+                            company_name=report_item['company_name'],
+                            report_type='tracxn'
+                        )
+                    except Exception as e:
+                        logger.warning(f"S3 section save failed for {section_type}: {e}")
         
-        # Save market funding reports
-        for report_item in analysis_result['market_funding_reports']:
-            ReportAnalysisSection.objects.create(
-                report=report,
-                section_type='market_funding',
-                company_name=report_item['company_name'],
-                content_markdown=report_item['content'],
-                order=section_order
-            )
-            section_order += 1
+        # Save all 7 summaries
+        summary_types = [
+            ('company_overview_summary', 'company_overview_summary'),
+            ('tech_product_summary', 'tech_product_summary'),
+            ('market_demand_summary', 'market_demand_summary'),
+            ('competitor_summary', 'competitor_summary'),
+            ('market_funding_summary', 'market_funding_summary'),
+            ('growth_potential_summary', 'growth_potential_summary'),
+            ('swot_summary', 'swot_summary'),
+        ]
         
-        # Save growth potential reports
-        for report_item in analysis_result['growth_potential_reports']:
-            ReportAnalysisSection.objects.create(
-                report=report,
-                section_type='growth_potential',
-                company_name=report_item['company_name'],
-                content_markdown=report_item['content'],
-                order=section_order
-            )
-            section_order += 1
-        
-        # Save summaries
-        ReportAnalysisSection.objects.create(
-            report=report,
-            section_type='competitor_summary',
-            content_markdown=analysis_result['competitor_summary'],
-            order=section_order
-        )
-        section_order += 1
-        
-        ReportAnalysisSection.objects.create(
-            report=report,
-            section_type='market_funding_summary',
-            content_markdown=analysis_result['market_funding_summary'],
-            order=section_order
-        )
-        section_order += 1
-        
-        ReportAnalysisSection.objects.create(
-            report=report,
-            section_type='growth_potential_summary',
-            content_markdown=analysis_result['growth_potential_summary'],
-            order=section_order
-        )
-        section_order += 1
+        for result_key, section_type in summary_types:
+            content = analysis_result.get(result_key, '')
+            if content:
+                # 1. Save to DB
+                ReportAnalysisSection.objects.create(
+                    report=report,
+                    section_type=section_type,
+                    content_markdown=content,
+                    order=section_order
+                )
+                section_order += 1
+                
+                # 2. Save to S3
+                if getattr(settings, 'USE_S3', False):
+                    try:
+                        org_id = str(project.organization_id) if project.organization_id else 'default'
+                        report_storage.save_analysis_summary(
+                            project_id=str(project.id),
+                            org_id=org_id,
+                            version=report.current_version + 1,
+                            summary_type=result_key, # result_key matches summary_type in function
+                            content=content,
+                            report_type='tracxn'
+                        )
+                    except Exception as e:
+                        logger.warning(f"S3 summary save failed for {section_type}: {e}")
         
         # Save to S3 if enabled
         if getattr(settings, 'USE_S3', False):
@@ -1314,7 +1389,7 @@ def generate_tracxn_report(self, report_id, user_id):
                 'company_count': analysis_result['company_count'],
                 'sections_count': section_order
             },
-            changes_summary=f"6-step Tracxn analysis: {analysis_result['company_count']} startups",
+            changes_summary=f"14-step Tracxn analysis: {analysis_result['company_count']} startups",
             generated_by=user
         )
         

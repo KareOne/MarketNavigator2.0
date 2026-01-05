@@ -207,3 +207,207 @@ Add a final **Analytics Note** sentence explicitly stating that Diagnostic analy
             reports_text=reports_text,
             category_name="Growth Potential Summary"
         )
+    
+    # ========== New Analysis Types for 13-Step Pipeline ==========
+    
+    @staticmethod
+    def generate_company_overview(company: Dict[str, Any], target_market_context: str = "") -> str:
+        """
+        Generate prompt for company overview analysis.
+        
+        Persona: Strategic Business Analyst
+        Purpose: Provide a snapshot of the startup's core business and market positioning.
+        """
+        formatted_context = ""
+        if target_market_context:
+            formatted_context = f"**TARGET MARKET CONTEXT:** {target_market_context}\n\n"
+        
+        category_instructions = """**Persona: A strategic Business Analyst providing a high-level executive snapshot.**
+
+- Summarize the company's core business in 2-3 sentences based on the 'Overview' or 'description' field.
+- Identify the primary sector(s) and market(s) the company operates in.
+- State the company's founding year, headquarters location, and current stage (if available).
+- Highlight the company's key value proposition and target customer segment.
+- Provide a quick assessment of the company's market relevance and positioning within its sector."""
+        
+        return TracxnPromptTemplates.BASE_PROMPT_TEMPLATE.format(
+            target_market_context=formatted_context,
+            company_data=TracxnPromptTemplates._format_company_data(company),
+            category_instructions=category_instructions
+        )
+    
+    @staticmethod
+    def generate_tech_product_report(company: Dict[str, Any], target_market_context: str = "") -> str:
+        """
+        Generate prompt for technology & product analysis.
+        
+        Persona: Technical Due Diligence Expert
+        Purpose: Assess technology stack, product capabilities, and technical moat.
+        """
+        formatted_context = ""
+        if target_market_context:
+            formatted_context = f"**TARGET MARKET CONTEXT:** {target_market_context}\n\n"
+        
+        category_instructions = """**Persona: A Technical Due Diligence Expert evaluating the company's technology and product.**
+
+- Analyze any technology or product information available in the company data.
+- Identify the core product or service offering described in the overview.
+- Look for technology keywords (AI, ML, Cloud, SaaS, etc.) in the description or sectors.
+- Assess the technical sophistication based on available information.
+- Identify any platform capabilities, integrations, or technical differentiators mentioned.
+- If the company is in a tech-heavy sector, comment on likely technical requirements.
+- Provide a verdict on the company's product maturity and technical positioning."""
+        
+        return TracxnPromptTemplates.BASE_PROMPT_TEMPLATE.format(
+            target_market_context=formatted_context,
+            company_data=TracxnPromptTemplates._format_company_data(company),
+            category_instructions=category_instructions
+        )
+    
+    @staticmethod
+    def generate_market_demand_report(company: Dict[str, Any], target_market_context: str = "") -> str:
+        """
+        Generate prompt for market demand & traction analysis.
+        
+        Persona: Market Research Analyst
+        Purpose: Assess market demand signals and company traction.
+        """
+        formatted_context = ""
+        if target_market_context:
+            formatted_context = f"**TARGET MARKET CONTEXT:** {target_market_context}\n\n"
+        
+        category_instructions = """**Persona: A Market Research Analyst assessing demand signals and company traction.**
+
+- Analyze any indicators of market demand or traction from the company data.
+- Look at employee count growth as a proxy for business growth.
+- Examine the company's ranking scores (Tracxn score, growth rank) as market signals.
+- Identify the company's target market size based on its sector and geography.
+- Assess the company's competitive ranking within its sector.
+- Comment on any revenue, customer, or traction indicators if available.
+- Provide a verdict on the company's market demand and traction status."""
+        
+        return TracxnPromptTemplates.BASE_PROMPT_TEMPLATE.format(
+            target_market_context=formatted_context,
+            company_data=TracxnPromptTemplates._format_company_data(company),
+            category_instructions=category_instructions
+        )
+    
+    @staticmethod
+    def generate_swot_report(company: Dict[str, Any], target_market_context: str = "") -> str:
+        """
+        Generate prompt for SWOT analysis.
+        
+        Persona: Strategic Planning Consultant
+        Purpose: Comprehensive SWOT assessment for strategic decision-making.
+        """
+        formatted_context = ""
+        if target_market_context:
+            formatted_context = f"**TARGET MARKET CONTEXT:** {target_market_context}\n\n"
+        
+        category_instructions = """**Persona: A Strategic Planning Consultant conducting a comprehensive SWOT analysis.**
+
+**STRUCTURE REQUIREMENT:**
+Override the standard section order and use this SWOT-specific structure:
+
+## Strengths
+- List 3-5 key internal strengths based on the company data (technology, team, funding, market position).
+
+## Weaknesses
+- List 3-5 internal weaknesses or limitations evident from the data (gaps, risks, resource constraints).
+
+## Opportunities
+- List 3-5 external opportunities the company could capitalize on based on its sector and market.
+
+## Threats
+- List 3-5 external threats or competitive risks the company faces.
+
+## Strategic Implications
+- Provide a concise summary of how strengths can address threats and capitalize on opportunities.
+- Highlight the most critical weakness that needs addressing.
+
+Base your analysis ONLY on the provided company data. Do not speculate beyond what the data supports."""
+        
+        return TracxnPromptTemplates.BASE_PROMPT_TEMPLATE.format(
+            target_market_context=formatted_context,
+            company_data=TracxnPromptTemplates._format_company_data(company),
+            category_instructions=category_instructions
+        )
+    
+    # ========== New Summary Methods ==========
+    
+    @staticmethod
+    def generate_company_overview_summary(reports: List[str], sample_size: int, target_market_context: str = "") -> str:
+        """Generate prompt for company overview summary."""
+        reports_text = "\n\n---\n\n".join([
+            f"Report {i+1}:\n{report}"
+            for i, report in enumerate(reports)
+        ])
+        
+        formatted_context = ""
+        if target_market_context:
+            formatted_context = f"**TARGET MARKET CONTEXT:** {target_market_context}\n\n"
+        
+        return TracxnPromptTemplates.SUMMARY_BASE_TEMPLATE.format(
+            target_market_context=formatted_context,
+            sample_size=sample_size,
+            reports_text=reports_text,
+            category_name="Market Overview Summary"
+        )
+    
+    @staticmethod
+    def generate_tech_product_summary(reports: List[str], sample_size: int, target_market_context: str = "") -> str:
+        """Generate prompt for technology & product summary."""
+        reports_text = "\n\n---\n\n".join([
+            f"Report {i+1}:\n{report}"
+            for i, report in enumerate(reports)
+        ])
+        
+        formatted_context = ""
+        if target_market_context:
+            formatted_context = f"**TARGET MARKET CONTEXT:** {target_market_context}\n\n"
+        
+        return TracxnPromptTemplates.SUMMARY_BASE_TEMPLATE.format(
+            target_market_context=formatted_context,
+            sample_size=sample_size,
+            reports_text=reports_text,
+            category_name="Technology & Product Landscape Summary"
+        )
+    
+    @staticmethod
+    def generate_market_demand_summary(reports: List[str], sample_size: int, target_market_context: str = "") -> str:
+        """Generate prompt for market demand summary."""
+        reports_text = "\n\n---\n\n".join([
+            f"Report {i+1}:\n{report}"
+            for i, report in enumerate(reports)
+        ])
+        
+        formatted_context = ""
+        if target_market_context:
+            formatted_context = f"**TARGET MARKET CONTEXT:** {target_market_context}\n\n"
+        
+        return TracxnPromptTemplates.SUMMARY_BASE_TEMPLATE.format(
+            target_market_context=formatted_context,
+            sample_size=sample_size,
+            reports_text=reports_text,
+            category_name="Market Demand & Traction Summary"
+        )
+    
+    @staticmethod
+    def generate_swot_summary(reports: List[str], sample_size: int, target_market_context: str = "") -> str:
+        """Generate prompt for SWOT summary across all analyzed companies."""
+        reports_text = "\n\n---\n\n".join([
+            f"Report {i+1}:\n{report}"
+            for i, report in enumerate(reports)
+        ])
+        
+        formatted_context = ""
+        if target_market_context:
+            formatted_context = f"**TARGET MARKET CONTEXT:** {target_market_context}\n\n"
+        
+        return TracxnPromptTemplates.SUMMARY_BASE_TEMPLATE.format(
+            target_market_context=formatted_context,
+            sample_size=sample_size,
+            reports_text=reports_text,
+            category_name="Strategic SWOT Landscape Summary"
+        )
+

@@ -211,6 +211,58 @@ export default function ReportPage() {
         }
     };
 
+    const handleDownloadMarkdown = async () => {
+        try {
+            const response = await fetch(
+                `${API_URL}/api/reports/project/${projectId}/${reportId}/download-markdown/`,
+                { headers: { Authorization: `Bearer ${token}` } }
+            );
+            if (!response.ok) throw new Error('Download failed');
+
+            const blob = await response.blob();
+            const filename = response.headers.get('Content-Disposition')?.match(/filename="(.+)"/)?.[1]
+                || `${project?.name || 'report'}_${report?.report_type}_report.md`;
+
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        } catch (error) {
+            console.error('Download failed:', error);
+            alert('Failed to download report. Please try again.');
+        }
+    };
+
+    const handleDownloadRawData = async () => {
+        try {
+            const response = await fetch(
+                `${API_URL}/api/reports/project/${projectId}/${reportId}/download-raw-data/`,
+                { headers: { Authorization: `Bearer ${token}` } }
+            );
+            if (!response.ok) throw new Error('Download failed');
+
+            const blob = await response.blob();
+            const filename = response.headers.get('Content-Disposition')?.match(/filename="(.+)"/)?.[1]
+                || `${project?.name || 'report'}_${report?.report_type}_raw_data.json`;
+
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        } catch (error) {
+            console.error('Download failed:', error);
+            alert('Failed to download raw data. Please try again.');
+        }
+    };
+
     if (authLoading || isLoading) {
         return (
             <div className="loading" style={{ height: "100vh" }}>
@@ -421,28 +473,74 @@ export default function ReportPage() {
                     >
                         {/* Report Header */}
                         <div style={{ marginBottom: "24px" }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                                <div style={{
-                                    width: "48px",
-                                    height: "48px",
-                                    background: "var(--gradient-primary)",
-                                    borderRadius: "12px",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    justifyContent: "center",
-                                    fontSize: "24px"
-                                }}>
-                                    🔍
+                            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "16px", flexWrap: "wrap" }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                                    <div style={{
+                                        width: "48px",
+                                        height: "48px",
+                                        background: "var(--gradient-primary)",
+                                        borderRadius: "12px",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        fontSize: "24px"
+                                    }}>
+                                        🔍
+                                    </div>
+                                    <div>
+                                        <h1 style={{ margin: 0, fontSize: "22px", fontWeight: 700, color: "var(--color-heading)" }}>
+                                            {report?.report_type === 'social' ? 'Social Media Analysis Report' :
+                                                report?.report_type === 'tracxn' ? 'Tracxn Market Report' :
+                                                    'Crunchbase Analysis Report'}
+                                        </h1>
+                                        <p style={{ margin: "4px 0 0", fontSize: "13px", color: "var(--color-text-muted)" }}>
+                                            {project?.name} • {report?.completed_at ? new Date(report.completed_at).toLocaleDateString() : 'In Progress'}
+                                        </p>
+                                    </div>
                                 </div>
-                                <div>
-                                    <h1 style={{ margin: 0, fontSize: "22px", fontWeight: 700, color: "var(--color-heading)" }}>
-                                        {report?.report_type === 'social' ? 'Social Media Analysis Report' :
-                                            report?.report_type === 'tracxn' ? 'Tracxn Market Report' :
-                                                'Crunchbase Analysis Report'}
-                                    </h1>
-                                    <p style={{ margin: "4px 0 0", fontSize: "13px", color: "var(--color-text-muted)" }}>
-                                        {project?.name} • {report?.completed_at ? new Date(report.completed_at).toLocaleDateString() : 'In Progress'}
-                                    </p>
+
+                                {/* Download Buttons */}
+                                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                                    <button
+                                        onClick={handleDownloadMarkdown}
+                                        style={{
+                                            display: "flex",
+                                            alignItems: "center",
+                                            gap: "6px",
+                                            padding: "8px 14px",
+                                            background: "var(--color-surface-muted)",
+                                            border: "1px solid var(--color-border)",
+                                            borderRadius: "var(--radius-sm)",
+                                            color: "var(--color-text)",
+                                            fontSize: "12px",
+                                            fontWeight: 500,
+                                            cursor: "pointer",
+                                            transition: "all 0.2s ease"
+                                        }}
+                                        title="Download report as Markdown file"
+                                    >
+                                        📄 Download Markdown
+                                    </button>
+                                    <button
+                                        onClick={handleDownloadRawData}
+                                        style={{
+                                            display: "flex",
+                                            alignItems: "center",
+                                            gap: "6px",
+                                            padding: "8px 14px",
+                                            background: "var(--color-surface-muted)",
+                                            border: "1px solid var(--color-border)",
+                                            borderRadius: "var(--radius-sm)",
+                                            color: "var(--color-text)",
+                                            fontSize: "12px",
+                                            fontWeight: 500,
+                                            cursor: "pointer",
+                                            transition: "all 0.2s ease"
+                                        }}
+                                        title="Download raw API data as JSON"
+                                    >
+                                        📦 Download Raw JSON
+                                    </button>
                                 </div>
                             </div>
                         </div>
