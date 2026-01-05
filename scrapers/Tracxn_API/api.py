@@ -2003,9 +2003,10 @@ async def scrape_batch_companies_api_with_rank(request: BatchCompaniesAPIWithRan
                     "message": message,
                     "data": data or {}
                 }
-                # Use Docker internal hostname for container-to-container communication
+                # Use configured callback URL (default to backend for docker, but allow override for local script)
+                callback_url = os.getenv("STATUS_CALLBACK_URL", "http://backend:8000/api/reports/status-update/")
                 await client.post(
-                    "http://backend:8000/api/reports/status-update/",
+                    callback_url,
                     json=payload,
                     headers={"Content-Type": "application/json"}
                 )
@@ -2097,6 +2098,31 @@ async def scrape_batch_companies_api_with_rank(request: BatchCompaniesAPIWithRan
                         
                         logger.info(f"API returned {len(company_data_list)} companies for '{keyword}'")
                         
+                        # Generate preview of found companies for status update
+                        found_names = []
+                        if company_data_list:
+                            for c in company_data_list[:5]:
+                                if isinstance(c, dict):
+                                    found_names.append(c.get('name', 'Unknown'))
+                        
+                        preview_msg = ", ".join(found_names)
+                        if len(company_data_list) > 5:
+                            preview_msg += f" +{len(company_data_list)-5} more"
+                            
+                        # Send updated status with results
+                        await send_status_update(
+                            "api_search",
+                            "search_result",
+                            f"Searched '{keyword}': Found {len(company_data_list)} companies ({preview_msg})",
+                            {
+                                "keyword": keyword,
+                                "companies_found": len(company_data_list),
+                                "top_companies": found_names,
+                                "total_keywords": len(request.company_names),
+                                "keyword_index": idx
+                            }
+                        )
+
                         # Track companies with their metadata
                         for company_data in company_data_list:
                             if isinstance(company_data, dict):

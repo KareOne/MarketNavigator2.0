@@ -55,7 +55,7 @@ class ReportProgressTracker:
             {'key': 'init', 'name': 'Generating Keywords', 'description': 'Creating AI-powered search keywords', 'weight': 2},
             {'key': 'api_search', 'name': 'Searching Tracxn', 'description': 'Finding similar startups', 'weight': 10},
             {'key': 'sorting', 'name': 'Ranking Results', 'description': 'Sorting by relevance and scoring', 'weight': 2},
-            {'key': 'fetching_details', 'name': 'Fetching Startup Details', 'description': 'Scraping detailed startup data', 'weight': 4},
+            {'key': 'fetching_details', 'name': 'Gathering full data of companies', 'description': 'Scraping detailed startup data', 'weight': 4},
             {'key': 'company_overview', 'name': 'Company Overview', 'description': 'Generating market overview', 'weight': 6},
             {'key': 'tech_product', 'name': 'Technology & Product Analysis', 'description': 'Analyzing tech stack and products', 'weight': 10},
             {'key': 'market_demand', 'name': 'Market Demand Analysis', 'description': 'Evaluating traction and demand', 'weight': 10},

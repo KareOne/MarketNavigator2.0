@@ -1167,16 +1167,16 @@ def generate_tracxn_report(self, report_id, user_id):
         if not startups_for_analysis:
             raise Exception("No startups found for analysis")
         
-        # ===== Step 4: Fetching Details =====
+        # ===== Step 4: Gathering Full Data =====
         tracker.start_step('fetching_details')
         tracker.update_step_message(
             'fetching_details',
-            f"Processing {len(startups_for_analysis)} startups...",
+            f"Gathering full data for {len(startups_for_analysis)} startups...",
             progress_percent=50
         )
         tracker.complete_step('fetching_details', {'startups_processed': len(startups_for_analysis)})
         
-        # ===== Steps 5-8: Run AI Analysis Pipeline =====
+        # ===== Steps 5-11: Run AI Analysis Pipeline =====
         async def run_analysis_with_tracking():
             """Run analysis pipeline with step-by-step progress updates."""
             from asgiref.sync import sync_to_async
@@ -1191,7 +1191,49 @@ def generate_tracxn_report(self, report_id, user_id):
             
             num_startups = len(startups_for_analysis)
             
-            # Step 5: Competitor Analysis
+            # Step 5: Company Overview
+            await start_step('company_overview')
+            company_overview_reports = []
+            for startup in startups_for_analysis:
+                startup_name = startup.get('name', 'Unknown')
+                try:
+                    prompt = pipeline.prompts.generate_company_overview(startup, target_description)
+                    content = await pipeline._call_ai(prompt)
+                    company_overview_reports.append({'company_name': startup_name, 'content': content})
+                except Exception as e:
+                    logger.error(f"Company overview failed for {startup_name}: {e}")
+                    company_overview_reports.append({'company_name': startup_name, 'content': f"Analysis error: {str(e)}"})
+            await complete_step('company_overview', {'startups_analyzed': len(company_overview_reports)})
+
+            # Step 6: Technology & Product
+            await start_step('tech_product')
+            tech_product_reports = []
+            for startup in startups_for_analysis:
+                startup_name = startup.get('name', 'Unknown')
+                try:
+                    prompt = pipeline.prompts.generate_tech_product_report(startup, target_description)
+                    content = await pipeline._call_ai(prompt)
+                    tech_product_reports.append({'company_name': startup_name, 'content': content})
+                except Exception as e:
+                    logger.error(f"Tech analysis failed for {startup_name}: {e}")
+                    tech_product_reports.append({'company_name': startup_name, 'content': f"Analysis error: {str(e)}"})
+            await complete_step('tech_product', {'startups_analyzed': len(tech_product_reports)})
+
+            # Step 7: Market Demand
+            await start_step('market_demand')
+            market_demand_reports = []
+            for startup in startups_for_analysis:
+                startup_name = startup.get('name', 'Unknown')
+                try:
+                    prompt = pipeline.prompts.generate_market_demand_report(startup, target_description)
+                    content = await pipeline._call_ai(prompt)
+                    market_demand_reports.append({'company_name': startup_name, 'content': content})
+                except Exception as e:
+                    logger.error(f"Market demand analysis failed for {startup_name}: {e}")
+                    market_demand_reports.append({'company_name': startup_name, 'content': f"Analysis error: {str(e)}"})
+            await complete_step('market_demand', {'startups_analyzed': len(market_demand_reports)})
+            
+            # Step 8: Competitor Analysis
             await start_step('competitor')
             competitor_reports = []
             for startup in startups_for_analysis:
@@ -1205,7 +1247,7 @@ def generate_tracxn_report(self, report_id, user_id):
                     competitor_reports.append({'company_name': startup_name, 'content': f"Analysis error: {str(e)}"})
             await complete_step('competitor', {'startups_analyzed': len(competitor_reports)})
             
-            # Step 6: Market & Funding Analysis
+            # Step 9: Market & Funding Analysis
             await start_step('market_funding')
             market_funding_reports = []
             for startup in startups_for_analysis:
@@ -1219,7 +1261,7 @@ def generate_tracxn_report(self, report_id, user_id):
                     market_funding_reports.append({'company_name': startup_name, 'content': f"Analysis error: {str(e)}"})
             await complete_step('market_funding', {'startups_analyzed': len(market_funding_reports)})
             
-            # Step 7: Growth Potential Analysis
+            # Step 10: Growth Potential Analysis
             await start_step('growth_potential')
             growth_potential_reports = []
             for startup in startups_for_analysis:
@@ -1233,10 +1275,45 @@ def generate_tracxn_report(self, report_id, user_id):
                     growth_potential_reports.append({'company_name': startup_name, 'content': f"Analysis error: {str(e)}"})
             await complete_step('growth_potential', {'startups_analyzed': len(growth_potential_reports)})
             
-            # Step 8: Executive Summaries
+            # Step 11: SWOT Analysis
+            await start_step('swot')
+            swot_reports = []
+            for startup in startups_for_analysis:
+                startup_name = startup.get('name', 'Unknown')
+                try:
+                    prompt = pipeline.prompts.generate_swot_report(startup, target_description)
+                    content = await pipeline._call_ai(prompt)
+                    swot_reports.append({'company_name': startup_name, 'content': content})
+                except Exception as e:
+                    logger.error(f"SWOT analysis failed for {startup_name}: {e}")
+                    swot_reports.append({'company_name': startup_name, 'content': f"Analysis error: {str(e)}"})
+            await complete_step('swot', {'startups_analyzed': len(swot_reports)})
+
+            # Step 12: Executive Summaries
             await start_step('summaries')
             summaries = {}
             
+            # Company Overview Summary
+            overview_texts = [r['content'] for r in company_overview_reports]
+            summaries['company_overview_summary'] = await pipeline._call_ai(
+                pipeline.prompts.generate_company_overview_summary(overview_texts, num_startups, target_description),
+                max_tokens=4000
+            )
+
+            # Tech & Product Summary
+            tech_texts = [r['content'] for r in tech_product_reports]
+            summaries['tech_product_summary'] = await pipeline._call_ai(
+                pipeline.prompts.generate_tech_product_summary(tech_texts, num_startups, target_description),
+                max_tokens=4000
+            )
+
+            # Market Demand Summary
+            demand_texts = [r['content'] for r in market_demand_reports]
+            summaries['market_demand_summary'] = await pipeline._call_ai(
+                pipeline.prompts.generate_market_demand_summary(demand_texts, num_startups, target_description),
+                max_tokens=4000
+            )
+
             # Competitor Summary
             competitor_texts = [r['content'] for r in competitor_reports]
             summaries['competitor_summary'] = await pipeline._call_ai(
@@ -1257,6 +1334,13 @@ def generate_tracxn_report(self, report_id, user_id):
                 pipeline.prompts.generate_growth_potential_summary(growth_texts, num_startups, target_description),
                 max_tokens=4000
             )
+
+            # SWOT Summary
+            swot_texts = [r['content'] for r in swot_reports]
+            summaries['swot_summary'] = await pipeline._call_ai(
+                pipeline.prompts.generate_swot_summary(swot_texts, num_startups, target_description),
+                max_tokens=4000
+            )
             
             await complete_step('summaries', {'summaries_generated': len(summaries)})
             
@@ -1268,6 +1352,14 @@ def generate_tracxn_report(self, report_id, user_id):
                 'market_funding_summary': summaries['market_funding_summary'],
                 'growth_potential_summary': summaries['growth_potential_summary'],
                 'company_count': num_startups,
+                'company_overview_reports': company_overview_reports,
+                'tech_product_reports': tech_product_reports,
+                'market_demand_reports': market_demand_reports,
+                'swot_reports': swot_reports,
+                'company_overview_summary': summaries['company_overview_summary'],
+                'tech_product_summary': summaries['tech_product_summary'],
+                'market_demand_summary': summaries['market_demand_summary'],
+                'swot_summary': summaries['swot_summary'],
             }
         
         # Run the analysis
@@ -1291,6 +1383,14 @@ def generate_tracxn_report(self, report_id, user_id):
             'competitor_summary': analysis_result['competitor_summary'],
             'market_funding_summary': analysis_result['market_funding_summary'],
             'growth_potential_summary': analysis_result['growth_potential_summary'],
+            'company_overview_reports': analysis_result['company_overview_reports'],
+            'tech_product_reports': analysis_result['tech_product_reports'],
+            'market_demand_reports': analysis_result['market_demand_reports'],
+            'swot_reports': analysis_result['swot_reports'],
+            'company_overview_summary': analysis_result['company_overview_summary'],
+            'tech_product_summary': analysis_result['tech_product_summary'],
+            'market_demand_summary': analysis_result['market_demand_summary'],
+            'swot_summary': analysis_result['swot_summary'],
         }
         
         html_content = generate_tracxn_html(
