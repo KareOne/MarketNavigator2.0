@@ -292,7 +292,7 @@ def generate_crunchbase_report(self, report_id, user_id):
         
         # Parse company data for analysis
         companies_for_analysis = [
-            crunchbase_scraper.parse_company_data(c.get('company_data', c)) 
+            c.get('company_data', c)
             for c in top_companies[:10]
         ]
         

@@ -504,6 +504,7 @@ class EnrichmentCallbackView(APIView):
     Called when an enrichment task starts, completes, or fails.
     """
     permission_classes = []  # No auth required - internal call from orchestrator
+    throttle_scope = 'status_updates'
     
     def post(self, request):
         """
@@ -604,6 +605,7 @@ class EnrichmentInternalStatusView(APIView):
     Returns minimal status info needed for enrichment dispatch decisions.
     """
     permission_classes = []  # No auth - internal use only
+    throttle_scope = 'status_updates'
     
     def get(self, request):
         settings_obj = EnrichmentSettings.get_settings()
@@ -622,6 +624,7 @@ class EnrichmentInternalKeywordsView(APIView):
     Returns pending keywords ordered by priority.
     """
     permission_classes = []  # No auth - internal use only
+    throttle_scope = 'status_updates'
     
     def get(self, request):
         keywords = EnrichmentKeyword.objects.filter(status='pending').order_by('-priority', 'created_at')[:10]
