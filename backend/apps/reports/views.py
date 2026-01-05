@@ -405,6 +405,7 @@ class StatusUpdateView(APIView):
     No authentication required since it's internal container-to-container communication.
     """
     permission_classes = [AllowAny]  # Internal API, no auth needed
+    throttle_scope = 'status_updates'
     
     def post(self, request):
         """
