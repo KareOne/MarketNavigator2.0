@@ -667,7 +667,7 @@ class TracxnBot:
     async def get_new_email(self):
         try:
             self.email_inbox = EmailInbox()
-            self.email_address = self.email_inbox.get_new_mailbox(domain="kuaitt.com")
+            self.email_address = self.email_inbox.get_new_mailbox(domain="illfavoured.com")
         except Exception as e:
             self.log.error(f"Error creating new email inbox: {e}")
             return ""

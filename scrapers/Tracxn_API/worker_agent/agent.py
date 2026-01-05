@@ -435,15 +435,11 @@ class WorkerAgent:
     def _get_endpoint(self, action: str) -> str:
         """Get the local API endpoint for an action."""
         endpoints = {
-            # Crunchbase endpoints
-            "search_with_rank": "/search/crunchbase/top-similar-with-rank",
-            "search_similar": "/search/crunchbase/top-similar",
-            "search_batch": "/search/crunchbase/batch",
-            "enrich": "/search/crunchbase/batch",  # Enrichment uses batch endpoint
-            
-            # Tracxn endpoints
+            # Tracxn endpoints (mapped from orchestrator actions)
+            "search_with_rank": "/scrape-batch-api-with-rank",  # Matches action from tracxn_scraper.py
             "tracxn_search_with_rank": "/scrape-batch-api-with-rank",
             "tracxn_search": "/scrape-batch-api",
+            "search_batch": "/scrape-batch-api",
             
             # Generic
             "health": "/health",

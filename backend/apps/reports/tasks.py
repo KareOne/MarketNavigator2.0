@@ -1062,6 +1062,10 @@ def generate_tracxn_report(self, report_id, user_id):
             top_companies = result.get('top_companies_full_data', [])
             metadata = result.get('metadata', {})
             
+            # Close old DB connections to prevent timeouts after long blocking call
+            from django.db import close_old_connections
+            close_old_connections()
+            
             total_unique = metadata.get('total_unique_companies', len(all_companies))
             tracker.update_step_message(
                 'api_search', 
@@ -1114,8 +1118,8 @@ def generate_tracxn_report(self, report_id, user_id):
         
         top_startup_names = []
         for c in top_companies[:15]:
-            company_data = c.get('company_data', c)
-            name = company_data.get('name') or company_data.get('Name') or 'Unknown'
+            # Use name from wrapper directly
+            name = c.get('name') or 'Unknown'
             if name and name != 'Unknown':
                 top_startup_names.append(name)
         
@@ -1127,16 +1131,30 @@ def generate_tracxn_report(self, report_id, user_id):
         else:
             tracker.update_step_message('sorting', f"Ranking {len(top_companies)} startups by similarity...")
         
-        # Parse company data for analysis
-        startups_for_analysis = [
-            tracxn_scraper.parse_company_data(c.get('company_data', c)) 
-            for c in top_companies[:15]
-        ]
+        # Use raw company data for analysis (skipped normalization as requested)
+        # We need to inject 'name' so downstream logic (logs, report headers) works
+        startups_for_analysis = []
+        for c in top_companies[:15]:
+            raw_data = c.get('full_data', c)
+            # Ensure it's a dict
+            if not isinstance(raw_data, dict):
+                raw_data = {'raw_content': str(raw_data)}
+            
+            # Inject name from wrapper if missing in top level
+            if 'name' not in raw_data and c.get('name'):
+                raw_data['name'] = c.get('name')
+                
+            startups_for_analysis.append(raw_data)
         
         # Add sorted startups as step details
-        for idx, startup in enumerate(startups_for_analysis, 1):
-            name = startup.get('name', 'Unknown')
-            score = startup.get('combined_score', startup.get('tracxn_score', 'N/A'))
+        for idx, c in enumerate(top_companies[:15], 1):
+            name = c.get('name', 'Unknown')
+            # Use scores from the wrapper object (c)
+            score = c.get('combined_score', c.get('tracxn_score', 'N/A'))
+            
+            if isinstance(score, float):
+                score = f"{score:.2f}"
+                
             tracker.add_step_detail(
                 'sorting',
                 'startup_rank',

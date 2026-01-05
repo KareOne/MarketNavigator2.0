@@ -36,3 +36,7 @@ numpy>=1.26.0
 scikit-learn>=1.5.0
 sentence-transformers>=3.0.0
 torch>=2.0.0
+
+# Worker Agent Dependencies
+websockets>=12.0
+aiohttp>=3.9.0

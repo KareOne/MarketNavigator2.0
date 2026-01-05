@@ -7,11 +7,12 @@ echo "🚀 Starting Tracxn Worker Agent (Local)..."
 # Ensure we are in the script directory
 cd "$(dirname "$0")"
 
-# Activate venv
+# Check for venv and create/install if missing
 if [ ! -d "venv" ]; then
-    echo "❌ Virtual environment not found. Please run ./setup_env.sh first."
-    exit 1
+    echo "⚠️  Virtual environment not found. Setting up..."
+    ./setup_env.sh
 fi
+
 source venv/bin/activate
 
 # Go into worker_agent directory where agent.py resides

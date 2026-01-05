@@ -5,8 +5,8 @@
 cd "$(dirname "$0")"
 
 if [ ! -d "venv" ]; then
-    echo "❌ Virtual environment not found. Please run ./setup_env.sh first."
-    exit 1
+    echo "⚠️  Virtual environment not found. Setting up..."
+    ./setup_env.sh
 fi
 
 echo "🚀 Starting Tracxn API..."
