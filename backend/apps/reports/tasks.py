@@ -871,7 +871,7 @@ def generate_social_report(self, report_id, user_id):
         async_tracker = AsyncTracker(tracker)
         
         try:
-            analysis_result = loop.run_until_complete(
+            analysis_results = loop.run_until_complete(
                 analysis_pipeline.analyze(results_list, tracker=async_tracker)
             )
         except Exception as e:

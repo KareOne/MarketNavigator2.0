@@ -80,8 +80,8 @@ class TwitterAnalysisPipeline:
         
         for category in categories:
             if tracker:
-                tracker.start_step(category)
-                tracker.update_step_message(category, f"Analyzing {category}...")
+                await tracker.start_step(category)
+                await tracker.update_step_message(category, f"Analyzing {category}...")
             
             prompt = self.prompts.generate_category_report(
                 category=category,
@@ -96,14 +96,14 @@ class TwitterAnalysisPipeline:
             results[category] = content
             
             if tracker:
-                 tracker.add_step_detail(category, 'insight', f"Completed {category}", {'type': category})
-                 tracker.complete_step(category)
+                 await tracker.add_step_detail(category, 'insight', f"Completed {category}", {'type': category})
+                 await tracker.complete_step(category)
 
         # 2. Generate Cross-Cutting Insights
         cross_cutting_key = 'Cross-Cutting Insights'
         if tracker:
-            tracker.start_step(cross_cutting_key)
-            tracker.update_step_message(cross_cutting_key, "Generating Cross-Cutting Insights...")
+            await tracker.start_step(cross_cutting_key)
+            await tracker.update_step_message(cross_cutting_key, "Generating Cross-Cutting Insights...")
             
         cross_cutting_prompt = self.prompts.generate_cross_cutting_insights(
             data=tweet_data,
@@ -113,7 +113,7 @@ class TwitterAnalysisPipeline:
         results['Cross-Cutting Insights'] = cross_cutting_content
         
         if tracker:
-            tracker.complete_step(cross_cutting_key)
+            await tracker.complete_step(cross_cutting_key)
         
         return results
 
