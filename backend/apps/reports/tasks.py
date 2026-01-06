@@ -842,27 +842,41 @@ def generate_social_report(self, report_id, user_id):
             raise
 
         # ===== Step 3: Analysis =====
-        tracker.start_step('analysis')
+        # ===== Step 3: Analyze Tweets =====
+        # Note: Pipeline handles tracking of granular analysis steps internally
         
-        analysis_pipeline = TwitterAnalysisPipeline()
+        analysis_pipeline = TwitterAnalysisPipeline(target_market_description=target_desc)
         
         from asgiref.sync import sync_to_async
         
         class AsyncTracker:
+            def __init__(self, tracker):
+                self.tracker = tracker
+            
+            async def start_step(self, *args, **kwargs):
+                await sync_to_async(self.tracker.start_step)(*args, **kwargs)
+
+            async def update_step_message(self, *args, **kwargs):
                 await sync_to_async(self.tracker.update_step_message)(*args, **kwargs)
+
             async def add_step_detail(self, *args, **kwargs):
                 await sync_to_async(self.tracker.add_step_detail)(*args, **kwargs)
+
+            async def complete_step(self, *args, **kwargs):
+                await sync_to_async(self.tracker.complete_step)(*args, **kwargs)
+                
+            async def fail_step(self, *args, **kwargs):
+                await sync_to_async(self.tracker.fail_step)(*args, **kwargs)
 
         async_tracker = AsyncTracker(tracker)
         
         try:
-            analysis_results = loop.run_until_complete(
-                analysis_pipeline.analyze(all_tweets, tracker=async_tracker)
+            analysis_result = loop.run_until_complete(
+                analysis_pipeline.analyze(results_list, tracker=async_tracker)
             )
-            tracker.complete_step('analysis', {'sections': len(analysis_results)})
         except Exception as e:
             logger.error(f"Analysis failed: {e}")
-            tracker.fail_step('analysis', str(e))
+            raise
             raise
 
         # ===== Step 4: Save & Generate HTML =====
