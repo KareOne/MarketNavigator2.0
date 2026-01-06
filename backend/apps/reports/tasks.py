@@ -383,6 +383,11 @@ def generate_crunchbase_report(self, report_id, user_id):
             # Wrap tracker methods for async use
             start_step = sync_to_async(tracker.start_step, thread_sensitive=True)
             complete_step = sync_to_async(tracker.complete_step, thread_sensitive=True)
+            update_step_message = sync_to_async(tracker.update_step_message, thread_sensitive=True)
+            
+            # Wrap storage methods
+            save_section = sync_to_async(report_storage.save_analysis_section, thread_sensitive=True)
+            save_summary = sync_to_async(report_storage.save_analysis_summary, thread_sensitive=True)
             
             # Create pipeline (uses LIARA_MODEL from settings by default)
             pipeline = CrunchbaseAnalysisPipeline(
@@ -393,44 +398,16 @@ def generate_crunchbase_report(self, report_id, user_id):
             num_companies = len(companies_for_analysis)
             
             # Part 1: Company Deep Dive
-            # Note: We use 'analysis' as a generic step key if 'company_deep_dive' isn't in DB
-            # But let's assume we can use the new keys.
             await start_step('company_deep_dive')
             
-            # We call the pipeline's internal methods manually or just use analyze?
-            # Pipeline.analyze does strict progress callbacks which we set to None.
-            # But here we want granular saving. Let's replicate the loop from pipeline.analyze
-            # BUT adding the save-to-DB logic in between.
-            
-            # Actually, to avoid code duplication and logic drift, let's use pipeline.analyze
-            # and pass a progress callback that maps to our tracker.
-            
-            async def pipeline_progress_callback(step, message, progress):
-                # Map pipeline steps to tracker steps
-                # 'company_deep_dive' -> tracker step
-                # 'strategic_summary' -> tracker step
-                # 'fast_analysis' -> tracker step
-                try:
-                    # We might need to ensure the step is started in tracker
-                    pass 
-                except:
-                    pass
-                # Since we can't easily sync the "start_step" calls from inside the callback
-                # without race conditions or complex logic, we will stick to the manual loop pattern
-                # which allows saving intermediate results to DB (safer for long jobs).
-                
             # --- Part 1: Company Deep Dive ---
             deep_dive_reports = []
-            
-            # If 'company_deep_dive' is not a valid step in ReportProgressTracker model yet,
-            # we might default to 'analysis' step, but let's assume we use 'company_deep_dive'.
-            # If it fails at runtime, we might need to add it to initial_steps.
             
             for idx, company in enumerate(companies_for_analysis):
                 company_name = company.get("Company Name", company.get("name", f"Company {idx + 1}"))
                 
                 # Update tracker message
-                tracker.update_step_message(
+                await update_step_message(
                     'company_deep_dive', 
                     f"Analyzing {company_name} ({idx+1}/{num_companies})",
                     progress_percent=int((idx / num_companies) * 100)
@@ -450,7 +427,7 @@ def generate_crunchbase_report(self, report_id, user_id):
                     # Save per-company analysis to JSON
                     try:
                         org_id = str(project.organization_id) if project.organization_id else 'default'
-                        report_storage.save_analysis_section(
+                        await save_section(
                             project_id=str(project.id),
                             org_id=org_id,
                             version=report.current_version + 1,
@@ -476,7 +453,7 @@ def generate_crunchbase_report(self, report_id, user_id):
             
             # --- Part 2: Strategic Summary ---
             await start_step('strategic_summary')
-            tracker.update_step_message('strategic_summary', "Synthesizing strategic trends...")
+            await update_step_message('strategic_summary', "Synthesizing strategic trends...")
             
             strategic_summary = await pipeline._call_ai(
                 pipeline.prompts.generate_strategic_summary(companies_for_analysis)
@@ -485,7 +462,7 @@ def generate_crunchbase_report(self, report_id, user_id):
             # Save summary to JSON
             try:
                 org_id = str(project.organization_id) if project.organization_id else 'default'
-                report_storage.save_analysis_summary(
+                await save_summary(
                     project_id=str(project.id),
                     org_id=org_id,
                     version=report.current_version + 1,
@@ -499,7 +476,7 @@ def generate_crunchbase_report(self, report_id, user_id):
 
             # --- Part 3: Fast Analysis ---
             await start_step('fast_analysis')
-            tracker.update_step_message('fast_analysis', "Generating executive flash report...")
+            await update_step_message('fast_analysis', "Generating executive flash report...")
             
             fast_analysis = await pipeline._call_ai(
                 pipeline.prompts.generate_fast_analysis(companies_for_analysis)
@@ -508,7 +485,7 @@ def generate_crunchbase_report(self, report_id, user_id):
             # Save summary to JSON
             try:
                 org_id = str(project.organization_id) if project.organization_id else 'default'
-                report_storage.save_analysis_summary(
+                await save_summary(
                     project_id=str(project.id),
                     org_id=org_id,
                     version=report.current_version + 1,
