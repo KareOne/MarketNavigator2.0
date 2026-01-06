@@ -1,6 +1,6 @@
 """
 Crunchbase Analysis Pipeline Service.
-Orchestrates 13-step AI analysis process with progress tracking.
+Orchestrates the new 3-Part AI analysis system.
 """
 import logging
 import time
@@ -18,29 +18,19 @@ logger = logging.getLogger(__name__)
 
 class CrunchbaseAnalysisPipeline:
     """
-    Main pipeline for analyzing Crunchbase company data through 13 AI steps.
+    Main pipeline for analyzing Crunchbase company data through the new 3-part system.
     
-    Pipeline Steps:
-    1. Generate Company Overview (all companies)
-    2. Generate Technology & Product Reports (per company)
-    3. Generate Market Demand & Web Insights Reports (per company)
-    4. Generate Competitor Identification Reports (per company)
-    5. Generate Market & Funding Insights Reports (per company)
-    6. Generate Growth Potential Reports (per company)
-    7. Generate SWOT Analysis Reports (per company)
-    8. Generate Technology & Product Summary (aggregate)
-    9. Generate Market Demand Summary (aggregate)
-    10. Generate Competitor Summary (aggregate)
-    11. Generate Market & Funding Summary (aggregate)
-    12. Generate Growth Potential Summary (aggregate)
-    13. Generate SWOT Summary (aggregate)
+    Pipeline Parts:
+    1. Company Deep-Dive (per company) -> generate_company_summary
+    2. Strategic Summary (aggregate) -> generate_strategic_summary
+    3. Fast Analysis (aggregate) -> generate_fast_analysis
     """
     
     def __init__(
         self,
         target_market_description: str = "",
         progress_callback: Optional[Callable] = None,
-        model: str = None  # Will use Liara default if not specified
+        model: str = None
     ):
         """
         Initialize the analysis pipeline.
@@ -79,7 +69,7 @@ class CrunchbaseAnalysisPipeline:
             self.client = AsyncOpenAI(api_key=api_key)
             logger.info(f"Initialized CrunchbaseAnalysisPipeline with OpenAI ({self.model})")
     
-    async def _call_ai(self, prompt: str, max_tokens: int = 3000) -> str:
+    async def _call_ai(self, prompt: str, max_tokens: int = 4000) -> str:
         """Call OpenAI API with the given prompt."""
         try:
             response = await self.client.chat.completions.create(
@@ -109,7 +99,7 @@ class CrunchbaseAnalysisPipeline:
         max_companies: int = 10
     ) -> Dict[str, Any]:
         """
-        Run the complete 13-step analysis pipeline.
+        Run the complete analysis pipeline.
         
         Args:
             companies: List of company data dictionaries from Crunchbase API
@@ -134,109 +124,65 @@ class CrunchbaseAnalysisPipeline:
         }
         
         try:
-            # ===== Step 1: Company Overview =====
-            await self._update_progress("company_overview", "Generating company overview", 5)
-            logger.info("Step 1: Generating company overview...")
+            # ===== Part 1: Company Deep Dive (Per Company) =====
+            await self._update_progress("company_deep_dive", "Starting Company Deep Dive...", 10)
+            logger.info("Part 1: Generating Company Deep Dive reports...")
             
-            overview = await self._call_ai(
-                self.prompts.generate_company_overview(companies_for_analysis)
-            )
-            result["sections"]["company_overview"] = {
-                "content": overview,
-                "type": "company_overview"
-            }
+            deep_dive_reports = []
             
-            # ===== Steps 2-7: Per-Company Reports =====
-            # Store per-company reports organized by type
-            per_company_reports = {
-                "tech_product": [],
-                "market_demand": [],
-                "competitor": [],
-                "market_funding": [],
-                "growth_potential": [],
-                "swot": []
-            }
-            
-            # Define report types and their prompt generators
-            report_types = [
-                ("tech_product", self.prompts.generate_tech_product_report, "Technology & Product"),
-                ("market_demand", self.prompts.generate_market_demand_report, "Market Demand"),
-                ("competitor", self.prompts.generate_competitor_report, "Competitor"),
-                ("market_funding", self.prompts.generate_market_funding_report, "Market & Funding"),
-                ("growth_potential", self.prompts.generate_growth_potential_report, "Growth Potential"),
-                ("swot", self.prompts.generate_swot_report, "SWOT"),
-            ]
-            
-            base_progress = 10
-            progress_per_type = 10  # 6 types × 10 = 60% for per-company reports
-            
-            for type_idx, (report_key, prompt_fn, display_name) in enumerate(report_types):
-                step_progress = base_progress + (type_idx * progress_per_type)
-                await self._update_progress(
-                    report_key, 
-                    f"Analyzing {display_name} ({type_idx + 2}/7)", 
-                    step_progress
-                )
-                logger.info(f"Step {type_idx + 2}: Generating {display_name} reports...")
+            for idx, company in enumerate(companies_for_analysis):
+                company_name = company.get("Company Name", company.get("name", f"Company {idx + 1}"))
                 
-                for company_idx, company in enumerate(companies_for_analysis):
-                    company_name = company.get("Company Name", company.get("name", f"Company {company_idx + 1}"))
-                    
-                    try:
-                        report = await self._call_ai(prompt_fn(company))
-                        per_company_reports[report_key].append({
-                            "company_name": company_name,
-                            "content": report
-                        })
-                    except Exception as e:
-                        logger.error(f"Error generating {report_key} for {company_name}: {e}")
-                        per_company_reports[report_key].append({
-                            "company_name": company_name,
-                            "content": f"Analysis failed: {str(e)}"
-                        })
-            
-            result["sections"]["per_company"] = per_company_reports
-            
-            # ===== Steps 8-13: Executive Summaries =====
-            summary_types = [
-                ("tech_product_summary", self.prompts.generate_tech_product_summary, "tech_product", "Tech & Product Summary"),
-                ("market_demand_summary", self.prompts.generate_market_demand_summary, "market_demand", "Market Demand Summary"),
-                ("competitor_summary", self.prompts.generate_competitor_summary, "competitor", "Competitor Summary"),
-                ("market_funding_summary", self.prompts.generate_market_funding_summary, "market_funding", "Funding Summary"),
-                ("growth_potential_summary", self.prompts.generate_growth_potential_summary, "growth_potential", "Growth Summary"),
-                ("swot_summary", self.prompts.generate_swot_summary, "swot", "SWOT Summary"),
-            ]
-            
-            base_progress = 70
-            progress_per_summary = 5  # 6 summaries × 5 = 30%
-            
-            for sum_idx, (sum_key, prompt_fn, source_key, display_name) in enumerate(summary_types):
-                step_progress = base_progress + (sum_idx * progress_per_summary)
+                # Update progress
+                progress = 10 + int((idx / num_companies) * 60)  # 10% to 70%
                 await self._update_progress(
-                    sum_key,
-                    f"Generating {display_name} ({sum_idx + 8}/13)",
-                    step_progress
+                    "company_deep_dive", 
+                    f"Analyzing {company_name} ({idx+1}/{num_companies})", 
+                    progress
                 )
-                logger.info(f"Step {sum_idx + 8}: Generating {display_name}...")
                 
                 try:
-                    # Get the individual reports for this category
-                    individual_reports = [r["content"] for r in per_company_reports[source_key]]
-                    
-                    summary = await self._call_ai(
-                        prompt_fn(individual_reports, num_companies),
-                        max_tokens=4000
+                    report = await self._call_ai(
+                        self.prompts.generate_company_summary(company)
                     )
-                    result["sections"][sum_key] = {
-                        "content": summary,
-                        "type": sum_key
-                    }
+                    deep_dive_reports.append({
+                        "company_name": company_name,
+                        "content": report
+                    })
                 except Exception as e:
-                    logger.error(f"Error generating {sum_key}: {e}")
-                    result["sections"][sum_key] = {
-                        "content": f"Summary generation failed: {str(e)}",
-                        "type": sum_key
-                    }
+                    logger.error(f"Error analyzing {company_name}: {e}")
+                    deep_dive_reports.append({
+                        "company_name": company_name,
+                        "content": f"Analysis failed: {str(e)}"
+                    })
+            
+            result["sections"]["company_deep_dive"] = deep_dive_reports
+            
+            # ===== Part 2: Strategic Summary (Aggregate) =====
+            await self._update_progress("strategic_summary", "Generating Strategic Summary...", 80)
+            logger.info("Part 2: Generating Strategic Summary...")
+            
+            summary_content = await self._call_ai(
+                self.prompts.generate_strategic_summary(companies_for_analysis)
+            )
+            
+            result["sections"]["strategic_summary"] = {
+                "content": summary_content,
+                "type": "strategic_summary"
+            }
+            
+            # ===== Part 3: Fast Analysis (Aggregate) =====
+            await self._update_progress("fast_analysis", "Generating Fast Analysis...", 90)
+            logger.info("Part 3: Generating Fast Analysis...")
+            
+            fast_analysis_content = await self._call_ai(
+                self.prompts.generate_fast_analysis(companies_for_analysis)
+            )
+            
+            result["sections"]["fast_analysis"] = {
+                "content": fast_analysis_content,
+                "type": "fast_analysis"
+            }
             
             # Calculate total processing time
             result["processing_time"] = time.time() - start_time
@@ -253,7 +199,7 @@ class CrunchbaseAnalysisPipeline:
 
 def generate_analysis_html(result: Dict[str, Any], startup_name: str = "Your Startup") -> str:
     """
-    Generate simple HTML report from analysis results.
+    Generate HTML report from analysis results (New 3-Part Structure).
     
     Args:
         result: Analysis result dictionary from pipeline
@@ -272,83 +218,57 @@ def generate_analysis_html(result: Dict[str, Any], startup_name: str = "Your Sta
     nav_items = []
     section_html = []
     
-    # Add overview section
-    if "company_overview" in sections:
-        nav_items.append('<a href="#overview">Company Overview</a>')
-        content = sections["company_overview"]["content"]
+    # --- Part 3: Fast Analysis (Placed first for executives) ---
+    if "fast_analysis" in sections:
+        nav_items.append('<a href="#fast-analysis">⚡ Fast Analysis</a>')
+        content = sections["fast_analysis"]["content"]
         html_content = markdown.markdown(content, extensions=['tables', 'fenced_code'])
         section_html.append(f'''
-        <section id="overview" class="report-section">
-            <h2>📊 Company Overview</h2>
+        <section id="fast-analysis" class="report-section summary-section">
+            <h2>⚡ Fast Analysis (Board View)</h2>
             <div class="section-content">{html_content}</div>
         </section>
         ''')
-    
-    # Per-company report types
-    report_type_labels = {
-        "tech_product": ("💻", "Technology & Product"),
-        "market_demand": ("📈", "Market Demand & Web Insights"),
-        "competitor": ("🎯", "Competitor Identification"),
-        "market_funding": ("💰", "Market & Funding Insights"),
-        "growth_potential": ("🚀", "Growth Potential"),
-        "swot": ("⚖️", "SWOT Analysis")
-    }
-    
-    per_company = sections.get("per_company", {})
-    
-    for report_key, (icon, label) in report_type_labels.items():
-        if report_key in per_company and per_company[report_key]:
-            section_id = report_key.replace("_", "-")
-            nav_items.append(f'<a href="#{section_id}">{label}</a>')
-            
-            companies_html = []
-            for report in per_company[report_key]:
-                company_name = report["company_name"]
-                content = report["content"]
-                html_content = markdown.markdown(content, extensions=['tables', 'fenced_code'])
-                companies_html.append(f'''
-                <details class="company-report">
-                    <summary>{company_name}</summary>
-                    <div class="company-content">{html_content}</div>
-                </details>
-                ''')
-            
-            section_html.append(f'''
-            <section id="{section_id}" class="report-section">
-                <h2>{icon} {label}</h2>
-                <div class="companies-list">
-                    {"".join(companies_html)}
-                </div>
-            </section>
-            ''')
-    
-    # Executive Summaries
-    summary_labels = {
-        "tech_product_summary": ("💻", "Technology & Product Summary"),
-        "market_demand_summary": ("📈", "Market Demand Summary"),
-        "competitor_summary": ("🎯", "Competitor Summary"),
-        "market_funding_summary": ("💰", "Funding Summary"),
-        "growth_potential_summary": ("🚀", "Growth Summary"),
-        "swot_summary": ("⚖️", "SWOT Summary")
-    }
-    
-    # Add divider before summaries
-    nav_items.append('<span class="nav-divider">Executive Summaries</span>')
-    
-    for sum_key, (icon, label) in summary_labels.items():
-        if sum_key in sections:
-            section_id = sum_key.replace("_", "-")
-            nav_items.append(f'<a href="#{section_id}">{label}</a>')
-            
-            content = sections[sum_key]["content"]
+        
+    # --- Part 2: Strategic Summary ---
+    if "strategic_summary" in sections:
+        nav_items.append('<a href="#strategic-summary">🧠 Strategic Summary</a>')
+        content = sections["strategic_summary"]["content"]
+        html_content = markdown.markdown(content, extensions=['tables', 'fenced_code'])
+        section_html.append(f'''
+        <section id="strategic-summary" class="report-section">
+            <h2>🧠 Strategic Summary</h2>
+            <div class="section-content">{html_content}</div>
+        </section>
+        ''')
+
+    # --- Part 1: Company Deep Dives ---
+    deep_dive = sections.get("company_deep_dive", [])
+    if deep_dive:
+        nav_items.append('<span class="nav-divider">Company Deep Dives</span>')
+        nav_items.append('<a href="#deep-dives">🏢 Detailed Reports</a>')
+        
+        companies_html = []
+        for report in deep_dive:
+            company_name = report["company_name"]
+            content = report["content"]
             html_content = markdown.markdown(content, extensions=['tables', 'fenced_code'])
-            
-            section_html.append(f'''
-            <section id="{section_id}" class="report-section summary-section">
-                <h2>{icon} {label}</h2>
-                <div class="section-content">{html_content}</div>
-            </section>
+            companies_html.append(f'''
+            <details class="company-report">
+                <summary>{company_name}</summary>
+                <div class="company-content">{html_content}</div>
+            </details>
             ''')
+        
+        section_html.append(f'''
+        <section id="deep-dives" class="report-section">
+            <h2>🏢 Company Deep Dives</h2>
+            <p class="section-desc">Detailed 7-section analysis for each top competitor.</p>
+            <div class="companies-list">
+                {"".join(companies_html)}
+            </div>
+        </section>
+        ''')
     
     # Build complete HTML
     html = f'''<!DOCTYPE html>
@@ -456,11 +376,17 @@ def generate_analysis_html(result: Dict[str, Any], startup_name: str = "Your Sta
             border-bottom: 1px solid var(--border);
         }}
         
+        .section-desc {{
+            color: var(--muted);
+            margin-bottom: 20px;
+            font-size: 14px;
+        }}
+        
         .section-content {{
             font-size: 14px;
         }}
         
-        .section-content h3 {{ margin: 20px 0 10px; color: var(--text); }}
+        .section-content h3, .section-content h4 {{ margin: 20px 0 10px; color: var(--text); }}
         .section-content p {{ margin-bottom: 12px; }}
         .section-content ul, .section-content ol {{ margin: 12px 0 12px 20px; }}
         .section-content li {{ margin-bottom: 6px; }}

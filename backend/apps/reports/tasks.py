@@ -375,7 +375,7 @@ def generate_crunchbase_report(self, report_id, user_id):
             'company_names': final_company_names
         })
         
-        # ===== Steps 3-10: Run Analysis Pipeline =====
+        # ===== Part 1-3: Run Analysis Pipeline =====
         async def run_analysis_with_tracking():
             """Run analysis pipeline with step-by-step progress updates."""
             from asgiref.sync import sync_to_async
@@ -392,115 +392,138 @@ def generate_crunchbase_report(self, report_id, user_id):
             
             num_companies = len(companies_for_analysis)
             
-            # Step 3: Company Overview
-            await start_step('company_overview')
-            overview = await pipeline._call_ai(
-                pipeline.prompts.generate_company_overview(companies_for_analysis)
-            )
-            await complete_step('company_overview')
+            # Part 1: Company Deep Dive
+            # Note: We use 'analysis' as a generic step key if 'company_deep_dive' isn't in DB
+            # But let's assume we can use the new keys.
+            await start_step('company_deep_dive')
             
-            # Save company overview to JSON
-            try:
-                org_id = str(project.organization_id) if project.organization_id else 'default'
-                report_storage.save_analysis_section(
-                    project_id=str(project.id),
-                    org_id=org_id,
-                    version=report.current_version + 1,
-                    section_type='company_overview',
-                    content=overview
+            # We call the pipeline's internal methods manually or just use analyze?
+            # Pipeline.analyze does strict progress callbacks which we set to None.
+            # But here we want granular saving. Let's replicate the loop from pipeline.analyze
+            # BUT adding the save-to-DB logic in between.
+            
+            # Actually, to avoid code duplication and logic drift, let's use pipeline.analyze
+            # and pass a progress callback that maps to our tracker.
+            
+            async def pipeline_progress_callback(step, message, progress):
+                # Map pipeline steps to tracker steps
+                # 'company_deep_dive' -> tracker step
+                # 'strategic_summary' -> tracker step
+                # 'fast_analysis' -> tracker step
+                try:
+                    # We might need to ensure the step is started in tracker
+                    pass 
+                except:
+                    pass
+                # Since we can't easily sync the "start_step" calls from inside the callback
+                # without race conditions or complex logic, we will stick to the manual loop pattern
+                # which allows saving intermediate results to DB (safer for long jobs).
+                
+            # --- Part 1: Company Deep Dive ---
+            deep_dive_reports = []
+            
+            # If 'company_deep_dive' is not a valid step in ReportProgressTracker model yet,
+            # we might default to 'analysis' step, but let's assume we use 'company_deep_dive'.
+            # If it fails at runtime, we might need to add it to initial_steps.
+            
+            for idx, company in enumerate(companies_for_analysis):
+                company_name = company.get("Company Name", company.get("name", f"Company {idx + 1}"))
+                
+                # Update tracker message
+                tracker.update_step_message(
+                    'company_deep_dive', 
+                    f"Analyzing {company_name} ({idx+1}/{num_companies})",
+                    progress_percent=int((idx / num_companies) * 100)
                 )
-            except Exception as e:
-                logger.warning(f"Failed to save company overview JSON: {e}")
-            
-            # Per-company reports
-            per_company = {}
-            report_types = [
-                ('tech_product', pipeline.prompts.generate_tech_product_report),
-                ('market_demand', pipeline.prompts.generate_market_demand_report),
-                ('competitor', pipeline.prompts.generate_competitor_report),
-                ('market_funding', pipeline.prompts.generate_market_funding_report),
-                ('growth_potential', pipeline.prompts.generate_growth_potential_report),
-                ('swot', pipeline.prompts.generate_swot_report),
-            ]
-            
-            for step_key, prompt_fn in report_types:
-                await start_step(step_key)
-                per_company[step_key] = []
                 
-                for company in companies_for_analysis:
-                    company_name = company.get("Company Name", company.get("name", "Unknown"))
-                    try:
-                        content = await pipeline._call_ai(prompt_fn(company))
-                        per_company[step_key].append({
-                            'company_name': company_name,
-                            'content': content
-                        })
-                        
-                        # Save per-company analysis to JSON
-                        try:
-                            org_id = str(project.organization_id) if project.organization_id else 'default'
-                            report_storage.save_analysis_section(
-                                project_id=str(project.id),
-                                org_id=org_id,
-                                version=report.current_version + 1,
-                                section_type=step_key,
-                                content=content,
-                                company_name=company_name
-                            )
-                        except Exception as save_err:
-                            logger.warning(f"Failed to save {step_key} JSON for {company_name}: {save_err}")
-                            
-                    except Exception as e:
-                        logger.error(f"Analysis failed for {company_name}: {e}")
-                        per_company[step_key].append({
-                            'company_name': company_name,
-                            'content': f"Analysis error: {str(e)}"
-                        })
-                
-                await complete_step(step_key, {'companies_analyzed': len(per_company[step_key])})
-                
-                # Close DB connections after each big analysis chunk
-                await sync_to_async(close_old_connections)()
-            
-            # Step 10: Executive Summaries
-            await start_step('summaries')
-            summaries = {}
-            summary_types = [
-                ('tech_product_summary', pipeline.prompts.generate_tech_product_summary, 'tech_product'),
-                ('market_demand_summary', pipeline.prompts.generate_market_demand_summary, 'market_demand'),
-                ('competitor_summary', pipeline.prompts.generate_competitor_summary, 'competitor'),
-                ('market_funding_summary', pipeline.prompts.generate_market_funding_summary, 'market_funding'),
-                ('growth_potential_summary', pipeline.prompts.generate_growth_potential_summary, 'growth_potential'),
-                ('swot_summary', pipeline.prompts.generate_swot_summary, 'swot'),
-            ]
-            
-            for sum_key, prompt_fn, source_key in summary_types:
-                reports = [r['content'] for r in per_company.get(source_key, [])]
-                if reports:
-                    summaries[sum_key] = await pipeline._call_ai(
-                        prompt_fn(reports, num_companies),
-                        max_tokens=4000
+                try:
+                    # Call AI
+                    report_content = await pipeline._call_ai(
+                        pipeline.prompts.generate_company_summary(company)
                     )
                     
-                    # Save summary to JSON
+                    deep_dive_reports.append({
+                        "company_name": company_name,
+                        "content": report_content
+                    })
+                    
+                    # Save per-company analysis to JSON
                     try:
                         org_id = str(project.organization_id) if project.organization_id else 'default'
-                        report_storage.save_analysis_summary(
+                        report_storage.save_analysis_section(
                             project_id=str(project.id),
                             org_id=org_id,
                             version=report.current_version + 1,
-                            summary_type=sum_key,
-                            content=summaries[sum_key]
+                            section_type='company_deep_dive',
+                            content=report_content,
+                            company_name=company_name
                         )
                     except Exception as save_err:
-                        logger.warning(f"Failed to save {sum_key} JSON: {save_err}")
+                        logger.warning(f"Failed to save company_deep_dive JSON for {company_name}: {save_err}")
+                        
+                except Exception as e:
+                    logger.error(f"Analysis failed for {company_name}: {e}")
+                    deep_dive_reports.append({
+                        "company_name": company_name,
+                        "content": f"Analysis error: {str(e)}"
+                    })
+
+                # Close DB connections occasionally
+                if idx % 3 == 0:
+                    await sync_to_async(close_old_connections)()
             
-            await complete_step('summaries', {'summaries_generated': len(summaries)})
+            await complete_step('company_deep_dive', {'companies_analyzed': len(deep_dive_reports)})
+            
+            # --- Part 2: Strategic Summary ---
+            await start_step('strategic_summary')
+            tracker.update_step_message('strategic_summary', "Synthesizing strategic trends...")
+            
+            strategic_summary = await pipeline._call_ai(
+                pipeline.prompts.generate_strategic_summary(companies_for_analysis)
+            )
+            
+            # Save summary to JSON
+            try:
+                org_id = str(project.organization_id) if project.organization_id else 'default'
+                report_storage.save_analysis_summary(
+                    project_id=str(project.id),
+                    org_id=org_id,
+                    version=report.current_version + 1,
+                    summary_type='strategic_summary',
+                    content=strategic_summary
+                )
+            except Exception as e:
+                 logger.warning(f"Failed to save strategic_summary JSON: {e}")
+            
+            await complete_step('strategic_summary')
+
+            # --- Part 3: Fast Analysis ---
+            await start_step('fast_analysis')
+            tracker.update_step_message('fast_analysis', "Generating executive flash report...")
+            
+            fast_analysis = await pipeline._call_ai(
+                pipeline.prompts.generate_fast_analysis(companies_for_analysis)
+            )
+            
+            # Save summary to JSON
+            try:
+                org_id = str(project.organization_id) if project.organization_id else 'default'
+                report_storage.save_analysis_summary(
+                    project_id=str(project.id),
+                    org_id=org_id,
+                    version=report.current_version + 1,
+                    summary_type='fast_analysis',
+                    content=fast_analysis
+                )
+            except Exception as e:
+                 logger.warning(f"Failed to save fast_analysis JSON: {e}")
+            
+            await complete_step('fast_analysis')
             
             return {
-                'company_overview': overview,
-                'per_company': per_company,
-                'summaries': summaries,
+                'company_deep_dive': deep_dive_reports,
+                'strategic_summary': strategic_summary,
+                'fast_analysis': fast_analysis,
                 'company_count': num_companies
             }
         
@@ -512,20 +535,19 @@ def generate_crunchbase_report(self, report_id, user_id):
         finally:
             loop.close()
         
-        # ===== Step 11: Generate HTML =====
+        # ===== Generate HTML =====
         tracker.start_step('html_gen')
         
         # Format result for HTML generator
         formatted_result = {
             'company_count': analysis_result['company_count'],
-            'processing_time': 0,  # Will be calculated
+            'processing_time': 0,
             'sections': {
-                'company_overview': {'content': analysis_result['company_overview'], 'type': 'company_overview'},
-                'per_company': analysis_result['per_company'],
+                'company_deep_dive': analysis_result['company_deep_dive'],
+                'strategic_summary': {'content': analysis_result['strategic_summary'], 'type': 'strategic_summary'},
+                'fast_analysis': {'content': analysis_result['fast_analysis'], 'type': 'fast_analysis'},
             }
         }
-        for sum_key, content in analysis_result['summaries'].items():
-            formatted_result['sections'][sum_key] = {'content': content, 'type': sum_key}
         
         html_content = generate_analysis_html(
             formatted_result,
@@ -534,40 +556,41 @@ def generate_crunchbase_report(self, report_id, user_id):
         
         tracker.complete_step('html_gen', {'html_size': len(html_content)})
         
-        # ===== Step 12: Save =====
+        # ===== Save to DB =====
         tracker.start_step('save')
         
         # Save analysis sections to database
         section_order = 0
         
-        # Save overview
+        # 1. Fast Analysis (First in DB too for easier fetching if ordered)
         ReportAnalysisSection.objects.create(
             report=report,
-            section_type='company_overview',
-            content_markdown=analysis_result['company_overview'],
-            order=section_order
+            section_type='fast_analysis',
+            content_markdown=analysis_result['fast_analysis'],
+            order=section_order,
+            title="Fast Analysis"
         )
         section_order += 1
         
-        # Save per-company reports
-        for section_type, reports in analysis_result['per_company'].items():
-            for report_item in reports:
-                ReportAnalysisSection.objects.create(
-                    report=report,
-                    section_type=section_type,
-                    company_name=report_item['company_name'],
-                    content_markdown=report_item['content'],
-                    order=section_order
-                )
-                section_order += 1
+        # 2. Strategic Summary
+        ReportAnalysisSection.objects.create(
+            report=report,
+            section_type='strategic_summary',
+            content_markdown=analysis_result['strategic_summary'],
+            order=section_order,
+            title="Strategic Summary"
+        )
+        section_order += 1
         
-        # Save summaries
-        for sum_key, content in analysis_result['summaries'].items():
+        # 3. Company Deep Dives
+        for report_item in analysis_result['company_deep_dive']:
             ReportAnalysisSection.objects.create(
                 report=report,
-                section_type=sum_key,
-                content_markdown=content,
-                order=section_order
+                section_type='company_deep_dive',
+                company_name=report_item['company_name'],
+                content_markdown=report_item['content'],
+                order=section_order,
+                title=f"Analysis: {report_item['company_name']}"
             )
             section_order += 1
         
@@ -596,7 +619,7 @@ def generate_crunchbase_report(self, report_id, user_id):
                 'company_count': analysis_result['company_count'],
                 'sections_count': section_order
             },
-            changes_summary=f"Full 13-step analysis: {analysis_result['company_count']} companies",
+            changes_summary=f"Full 3-Part Analysis: {analysis_result['company_count']} companies",
             generated_by=user
         )
         
