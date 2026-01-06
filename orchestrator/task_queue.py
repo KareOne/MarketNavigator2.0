@@ -253,7 +253,7 @@ class TaskQueue:
     async def get_queue_stats(self) -> Dict[str, Dict[str, int]]:
         """Get queue statistics by API type."""
         stats = {}
-        api_types = ["crunchbase", "tracxn", "social"]
+        api_types = ["crunchbase", "tracxn", "social","linkedin"]
         
         for api_type in api_types:
             queue_key = f"{self.QUEUE_KEY}:{api_type}"
@@ -321,7 +321,7 @@ class TaskQueue:
         """
         Background loop that assigns pending tasks to idle workers.
         """
-        api_types = ["crunchbase", "tracxn", "social"]
+        api_types = ["crunchbase", "tracxn", "social","linkedin"]
         
         while True:
             try:

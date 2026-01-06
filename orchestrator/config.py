@@ -24,7 +24,7 @@ BACKEND_STATUS_URL = os.getenv(
 def _load_tokens() -> Dict[str, List[str]]:
     """Load worker tokens from environment variables."""
     tokens = {}
-    api_types = ["crunchbase", "tracxn", "social"]
+    api_types = ["crunchbase", "tracxn", "social","linkedin"]
     
     for api_type in api_types:
         env_key = f"WORKER_TOKENS_{api_type.upper()}"
