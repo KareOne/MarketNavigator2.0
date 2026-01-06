@@ -1730,3 +1730,191 @@ def generate_pitch_deck(self, report_id, user_id):
         report.error_message = str(e)
         report.save()
         raise
+
+
+@shared_task(bind=True, queue='reports')
+@close_db_wrapper
+def generate_quick_report(self, report_id, user_id):
+    """
+    Generate Quick Report using AI.
+    Uses comprehensive system prompt to generate market research report.
+    
+    Pipeline Steps:
+    1. Initialize & Build Prompt
+    2. Call AI for Report Generation
+    3. Parse and Save Sections
+    """
+    from .models import Report, ReportVersion, ReportAnalysisSection
+    from .progress_tracker import ReportProgressTracker
+    from apps.users.models import User
+    from services.openai_service import openai_service
+    from services.quick_report_prompts import (
+        get_quick_report_system_prompt,
+        build_user_prompt,
+        parse_report_sections
+    )
+    from services.report_storage import report_storage
+    
+    report = None
+    tracker = None
+    
+    try:
+        report = Report.objects.get(id=report_id)
+        user = User.objects.get(id=user_id)
+        project = report.project
+        inputs = project.inputs
+        
+        # Mark as running
+        report.status = 'running'
+        report.started_at = timezone.now()
+        report.save()
+        
+        # Initialize progress tracker
+        tracker = ReportProgressTracker(report)
+        tracker.initialize_steps()
+        
+        # ===== Step 1: Initialize & Build Prompt =====
+        tracker.start_step('init')
+        tracker.update_step_message('init', "Preparing market research request...")
+        
+        inputs_dict = get_project_inputs_dict(inputs)
+        
+        # Build the prompts
+        system_prompt = get_quick_report_system_prompt()
+        user_prompt = build_user_prompt(inputs_dict)
+        
+        tracker.add_step_detail('init', 'info', f"Startup: {inputs_dict.get('startup_name', 'Unknown')}")
+        tracker.complete_step('init', {'startup_name': inputs_dict.get('startup_name')})
+        
+        # ===== Step 2: AI Generation =====
+        tracker.start_step('api_search')  # Using api_search step key for progress consistency
+        tracker.update_step_message('api_search', "Generating comprehensive market research with AI...")
+        
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            # Call the AI service
+            report_content = loop.run_until_complete(
+                openai_service.chat_completion(
+                    messages=[{"role": "user", "content": user_prompt}],
+                    system_prompt=system_prompt,
+                    temperature=0.7,
+                    max_tokens=8000  # Large response for comprehensive report
+                )
+            )
+            
+            if not report_content or report_content.startswith("AI service is not configured"):
+                raise Exception("AI service unavailable or not configured")
+            
+            tracker.update_step_message('api_search', "AI analysis complete, processing results...")
+            tracker.complete_step('api_search', {'response_length': len(report_content)})
+            
+        except Exception as e:
+            logger.error(f"Quick Report AI generation failed: {e}")
+            tracker.fail_step('api_search', str(e))
+            raise
+        finally:
+            loop.close()
+        
+        # ===== Step 3: Parse and Save Sections =====
+        tracker.start_step('save')
+        tracker.update_step_message('save', "Saving report sections...")
+        
+        # Parse markdown into sections
+        sections = parse_report_sections(report_content)
+        
+        # Delete old sections if any
+        ReportAnalysisSection.objects.filter(report=report).delete()
+        
+        # Save sections to database
+        section_order = 0
+        for section_data in sections:
+            ReportAnalysisSection.objects.create(
+                report=report,
+                section_type=section_data['section_type'],
+                content_markdown=section_data['content'],
+                order=section_order
+            )
+            section_order += 1
+            
+            # Also save to S3
+            try:
+                org_id = str(project.organization_id) if project.organization_id else 'default'
+                report_storage.save_analysis_section(
+                    project_id=str(project.id),
+                    org_id=org_id,
+                    version=report.current_version + 1,
+                    section_type=section_data['section_type'],
+                    content=section_data['content'],
+                    report_type='quick_report'
+                )
+            except Exception as e:
+                logger.warning(f"S3 save failed for section {section_data['section_type']}: {e}")
+        
+        # Create simple HTML content for legacy support
+        html_content = f"<h1>Quick Market Research Report</h1>"
+        html_content += f"<h2>{inputs_dict.get('startup_name', 'Startup')}</h2>"
+        html_content += f"<div class='report-content'>{report_content}</div>"
+        
+        # Finalize report
+        report.current_version += 1
+        ReportVersion.objects.create(
+            report=report,
+            version_number=report.current_version,
+            html_content=html_content,
+            data_snapshot={'sections_count': len(sections)},
+            changes_summary=f"AI-generated market research with {len(sections)} sections",
+            generated_by=user
+        )
+        
+        report.status = 'completed'
+        report.progress = 100
+        report.current_step = 'Complete!'
+        report.html_content = html_content
+        report.completed_at = timezone.now()
+        report.save()
+        
+        # Save report metadata to S3
+        try:
+            org_id = str(project.organization_id) if project.organization_id else 'default'
+            report_storage.save_report_metadata(
+                project_id=str(project.id),
+                org_id=org_id,
+                version=report.current_version,
+                metadata={
+                    'report_id': str(report.id),
+                    'project_id': str(project.id),
+                    'org_id': org_id,
+                    'startup_name': inputs_dict.get('startup_name'),
+                    'sections_count': len(sections),
+                    'generated_at': report.completed_at.isoformat() if report.completed_at else None,
+                    'version': report.current_version,
+                    'status': 'success'
+                },
+                report_type='quick_report'
+            )
+            logger.info(f"✅ Saved Quick Report metadata for project {project.id}")
+        except Exception as e:
+            logger.warning(f"Failed to save Quick Report metadata: {e}")
+        
+        tracker.complete_step('save', {'sections_saved': len(sections)})
+        
+        logger.info(f"✅ Quick Report generated for project {project.id} with {len(sections)} sections")
+        return {"status": "success", "sections": len(sections)}
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to generate Quick Report: {e}")
+        if report:
+            report.status = 'failed'
+            report.error_message = str(e)
+            report.save()
+            if tracker:
+                from .models import ReportProgressStep
+                running_step = ReportProgressStep.objects.filter(
+                    report=report, status='running'
+                ).first()
+                if running_step:
+                    tracker.fail_step(running_step.step_key, str(e))
+        raise
+

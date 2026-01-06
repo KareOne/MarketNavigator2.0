@@ -104,6 +104,7 @@ interface ChatMode {
 }
 
 const REPORT_TYPES = [
+    { type: "quick_report", label: "Quick Report", icon: "⚡", description: "AI-powered market research report" },
     { type: "crunchbase", label: "Crunchbase Analysis", icon: "🔍", description: "Competitor intelligence and funding data" },
     { type: "tracxn", label: "Tracxn Insights", icon: "📊", description: "Startup landscape and market trends" },
     { type: "social", label: "Social Analysis", icon: "📱", description: "Brand mentions and social sentiment" },

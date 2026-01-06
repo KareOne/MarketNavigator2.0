@@ -12,7 +12,7 @@ import logging
 
 from .models import Report, ReportVersion
 from .serializers import ReportSerializer, ReportListSerializer, ReportVersionSerializer
-from .tasks import generate_crunchbase_report, generate_tracxn_report, generate_social_report, generate_pitch_deck
+from .tasks import generate_crunchbase_report, generate_tracxn_report, generate_social_report, generate_pitch_deck, generate_quick_report
 from .progress_tracker import ReportProgressTracker
 from apps.projects.models import Project
 
@@ -35,7 +35,7 @@ class ReportViewSet(viewsets.ReadOnlyModelViewSet):
         project = get_object_or_404(Project, id=project_id)
         
         # Ensure all 4 report types exist
-        report_types = ['crunchbase', 'tracxn', 'social', 'pitch_deck']
+        report_types = ['quick_report', 'crunchbase', 'tracxn', 'social', 'pitch_deck']
         for rt in report_types:
             Report.objects.get_or_create(
                 project=project,
@@ -92,6 +92,7 @@ class ReportViewSet(viewsets.ReadOnlyModelViewSet):
         
         # Start background task
         task_map = {
+            'quick_report': generate_quick_report,
             'crunchbase': generate_crunchbase_report,
             'tracxn': generate_tracxn_report,
             'social': generate_social_report,
@@ -272,6 +273,7 @@ class ReportViewSet(viewsets.ReadOnlyModelViewSet):
             
             # Build markdown
             report_type_names = {
+                'quick_report': 'Quick Market Research Report',
                 'crunchbase': 'Crunchbase Analysis Report',
                 'tracxn': 'Tracxn Market Report',
                 'social': 'Social Media Analysis Report',

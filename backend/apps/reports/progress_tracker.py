@@ -88,6 +88,11 @@ class ReportProgressTracker:
             {'key': 'html_gen', 'name': 'Generating HTML', 'description': 'Creating presentation slides', 'weight': 20},
             {'key': 'save', 'name': 'Saving', 'description': 'Saving pitch deck', 'weight': 10},
         ],
+        'quick_report': [
+            {'key': 'init', 'name': 'Preparing Request', 'description': 'Building market research request', 'weight': 5},
+            {'key': 'api_search', 'name': 'AI Analysis', 'description': 'Generating comprehensive market research with AI', 'weight': 80},
+            {'key': 'save', 'name': 'Saving Report', 'description': 'Saving report sections', 'weight': 15},
+        ],
     }
     
     # Number of DB operations before triggering connection cleanup

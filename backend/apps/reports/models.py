@@ -10,6 +10,7 @@ class Report(models.Model):
     """Report model for 4 panel types."""
     
     REPORT_TYPE_CHOICES = [
+        ('quick_report', 'Quick Report'),
         ('crunchbase', 'Crunchbase Analysis'),
         ('tracxn', 'Tracxn Analysis'),
         ('social', 'Social Analysis'),

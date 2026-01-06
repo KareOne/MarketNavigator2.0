@@ -96,6 +96,11 @@ class TimeEstimator:
             'html_gen': 10,
             'save': 5,
         },
+        'quick_report': {
+            'init': 3,              # Building prompt is fast
+            'api_search': 45,       # AI generation takes ~30-60 seconds
+            'save': 5,              # Saving sections
+        },
     }
     
     def __init__(self, report_type: str):

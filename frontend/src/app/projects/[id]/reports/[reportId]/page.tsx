@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useAuth } from "@/context/AuthContext";
 import TopBar from "@/components/TopBar";
 
@@ -489,9 +490,10 @@ export default function ReportPage() {
                                     </div>
                                     <div>
                                         <h1 style={{ margin: 0, fontSize: "22px", fontWeight: 700, color: "var(--color-heading)" }}>
-                                            {report?.report_type === 'social' ? 'Social Media Analysis Report' :
-                                                report?.report_type === 'tracxn' ? 'Tracxn Market Report' :
-                                                    'Crunchbase Analysis Report'}
+                                            {report?.report_type === 'quick_report' ? 'Quick Market Research Report' :
+                                                report?.report_type === 'social' ? 'Social Media Analysis Report' :
+                                                    report?.report_type === 'tracxn' ? 'Tracxn Market Report' :
+                                                        'Crunchbase Analysis Report'}
                                         </h1>
                                         <p style={{ margin: "4px 0 0", fontSize: "13px", color: "var(--color-text-muted)" }}>
                                             {project?.name} • {report?.completed_at ? new Date(report.completed_at).toLocaleDateString() : 'In Progress'}
@@ -628,8 +630,144 @@ export default function ReportPage() {
                                                 </details>
                                             ))}
                                         </div>
+                                    ) : report?.report_type === 'quick_report' ? (
+                                        // Quick Report with enhanced table rendering
+                                        <div
+                                            className="report-content markdown-content quick-report-content"
+                                            style={{
+                                                fontSize: "14px",
+                                                lineHeight: "1.7",
+                                                color: "var(--color-text)"
+                                            }}
+                                        >
+                                            <ReactMarkdown
+                                                remarkPlugins={[remarkGfm]}
+                                                components={{
+                                                    table: ({ children }) => (
+                                                        <div style={{
+                                                            overflowX: 'auto',
+                                                            marginBottom: '20px',
+                                                            borderRadius: '8px',
+                                                            border: '1px solid var(--color-border)',
+                                                            boxShadow: '0 2px 8px rgba(0,0,0,0.06)'
+                                                        }}>
+                                                            <table style={{
+                                                                width: '100%',
+                                                                borderCollapse: 'collapse',
+                                                                fontSize: '13px',
+                                                                background: 'var(--color-surface-elevated)'
+                                                            }}>
+                                                                {children}
+                                                            </table>
+                                                        </div>
+                                                    ),
+                                                    thead: ({ children }) => (
+                                                        <thead style={{
+                                                            background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
+                                                            color: '#fff'
+                                                        }}>
+                                                            {children}
+                                                        </thead>
+                                                    ),
+                                                    th: ({ children }) => (
+                                                        <th style={{
+                                                            padding: '12px 16px',
+                                                            textAlign: 'left',
+                                                            fontWeight: 600,
+                                                            fontSize: '12px',
+                                                            textTransform: 'uppercase',
+                                                            letterSpacing: '0.5px',
+                                                            borderBottom: '2px solid rgba(255,255,255,0.2)'
+                                                        }}>
+                                                            {children}
+                                                        </th>
+                                                    ),
+                                                    td: ({ children }) => (
+                                                        <td style={{
+                                                            padding: '12px 16px',
+                                                            borderBottom: '1px solid var(--color-border)',
+                                                            verticalAlign: 'top',
+                                                            maxWidth: '300px'
+                                                        }}>
+                                                            {children}
+                                                        </td>
+                                                    ),
+                                                    tr: ({ children }) => (
+                                                        <tr style={{
+                                                            transition: 'background 0.2s ease'
+                                                        }}
+                                                            onMouseEnter={(e) => {
+                                                                (e.currentTarget as HTMLElement).style.background = 'var(--color-surface-muted)';
+                                                            }}
+                                                            onMouseLeave={(e) => {
+                                                                (e.currentTarget as HTMLElement).style.background = 'transparent';
+                                                            }}
+                                                        >
+                                                            {children}
+                                                        </tr>
+                                                    ),
+                                                    h3: ({ children }) => (
+                                                        <h3 style={{
+                                                            margin: '24px 0 12px',
+                                                            fontSize: '16px',
+                                                            fontWeight: 600,
+                                                            color: 'var(--color-heading)',
+                                                            borderBottom: '2px solid var(--color-primary)',
+                                                            paddingBottom: '8px'
+                                                        }}>
+                                                            {children}
+                                                        </h3>
+                                                    ),
+                                                    h4: ({ children }) => (
+                                                        <h4 style={{
+                                                            margin: '20px 0 10px',
+                                                            fontSize: '14px',
+                                                            fontWeight: 600,
+                                                            color: 'var(--color-secondary)'
+                                                        }}>
+                                                            {children}
+                                                        </h4>
+                                                    ),
+                                                    ul: ({ children }) => (
+                                                        <ul style={{
+                                                            margin: '12px 0',
+                                                            paddingLeft: '20px',
+                                                            listStyleType: 'disc'
+                                                        }}>
+                                                            {children}
+                                                        </ul>
+                                                    ),
+                                                    li: ({ children }) => (
+                                                        <li style={{
+                                                            marginBottom: '8px',
+                                                            lineHeight: '1.6'
+                                                        }}>
+                                                            {children}
+                                                        </li>
+                                                    ),
+                                                    strong: ({ children }) => (
+                                                        <strong style={{
+                                                            color: 'var(--color-heading)',
+                                                            fontWeight: 600
+                                                        }}>
+                                                            {children}
+                                                        </strong>
+                                                    ),
+                                                    p: ({ children }) => (
+                                                        <p style={{
+                                                            margin: '12px 0',
+                                                            lineHeight: '1.7'
+                                                        }}>
+                                                            {children}
+                                                        </p>
+                                                    )
+                                                }}
+                                            >
+                                                {section.content || ''}
+                                            </ReactMarkdown>
+                                        </div>
                                     ) : (
-                                        // Overview and summary sections with direct content
+                                        // Overview and summary sections with direct content (Crunchbase, Tracxn, etc.)
                                         <div
                                             className="report-content markdown-content"
                                             style={{
