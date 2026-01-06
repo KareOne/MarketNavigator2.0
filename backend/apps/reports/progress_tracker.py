@@ -69,9 +69,22 @@ class ReportProgressTracker:
         ],
         'social': [
             {'key': 'init', 'name': 'Generating Keywords', 'description': 'Creating AI-powered social search keywords', 'weight': 5},
-            {'key': 'api_search', 'name': 'Searching Twitter', 'description': 'Searching for relevant discussions and tweets', 'weight': 35},
-            {'key': 'analysis', 'name': 'Analyzing Tweets', 'description': 'analyzing market sentiment and customer needs', 'weight': 55},
-            {'key': 'save', 'name': 'Saving', 'description': 'Saving report and analysis sections', 'weight': 5},
+            {'key': 'api_search', 'name': 'Searching Twitter', 'description': 'Searching for relevant discussions and tweets', 'weight': 20},
+            
+            # 10 Analysis Categories
+            {'key': 'Market Segmentation & Needs Analysis', 'name': 'Market Segmentation', 'description': 'Identifying audience groups and needs', 'weight': 7},
+            {'key': 'Jobs To Be Done (JTBD) Mapping', 'name': 'JTBD Mapping', 'description': 'Extracting user goals and jobs to be done', 'weight': 7},
+            {'key': 'Pain Points & Friction', 'name': 'Pain Points Analysis', 'description': 'Cataloging complaints and friction', 'weight': 7},
+            {'key': 'Feature & Product Demand Signals', 'name': 'Feature Demand', 'description': 'Identifying feature requests and gaps', 'weight': 7},
+            {'key': 'Willingness to Pay (WTP) & Pricing', 'name': 'Pricing Analysis', 'description': 'Analyzing WTP and pricing signals', 'weight': 7},
+            {'key': 'Competitive Landscape & Alternatives', 'name': 'Competitive Landscape', 'description': 'Mapping competitors and alternatives', 'weight': 7},
+            {'key': 'Adoption Triggers & Conversion Moments', 'name': 'Adoption Triggers', 'description': 'Identifying conversion moments', 'weight': 7},
+            {'key': 'User Roles & Organizational Context', 'name': 'User Roles', 'description': 'Detecting personas and context', 'weight': 6},
+            {'key': 'Use Cases & Application Scenarios', 'name': 'Use Cases', 'description': 'Describing real-world workflows', 'weight': 6},
+            {'key': 'Sentiment & Brand Perception', 'name': 'Sentiment Analysis', 'description': 'Measuring tone and brand perception', 'weight': 6},
+            
+            {'key': 'Cross-Cutting Insights', 'name': 'Cross-Cutting Insights', 'description': 'generating cross-cutting insights', 'weight': 5},
+            {'key': 'save', 'name': 'Saving', 'description': 'Saving report and analysis sections', 'weight': 3},
         ],
         'pitch_deck': [
             {'key': 'init', 'name': 'Initializing', 'description': 'Gathering project data', 'weight': 10},
