@@ -69,17 +69,12 @@ class TimeEstimator:
         },
         'tracxn': {
             'init': 5,
-            'api_search': 180,          # Tracxn API search is slower
+            'api_search': 180,          # Tracxn API search
             'sorting': 10,
-            'fetching_details': 60,     # Full data scraping
-            'company_overview': 30,
-            'tech_product': 90,
-            'market_demand': 90,
-            'competitor': 90,
-            'market_funding': 90,
-            'growth_potential': 90,
-            'swot': 90,
-            'summaries': 120,           # Multiple summaries (7 total)
+            'fetching_details': 30,     # Full data collection
+            'flash_analysis': 30,       # 2-page flash report
+            'company_deep_dive': 300,   # ~20s per company × 15 companies
+            'executive_summary': 45,    # 5-page executive synthesis
             'html_gen': 10,
             'save': 5,
         },

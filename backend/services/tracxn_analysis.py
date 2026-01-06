@@ -1,26 +1,11 @@
 """
 Tracxn Analysis Pipeline Service.
-Orchestrates 14-step AI analysis process with progress tracking.
+Orchestrates 3-step institutional-grade AI analysis with progress tracking.
 
-Per FINAL_ARCHITECTURE_SPECIFICATION.md - Panel 2: Tracxn Analysis.
-
-Pipeline Steps (Per Company):
-1. Company Overview Report
-2. Technology & Product Report
-3. Market Demand Report
-4. Competitor Identification Report
-5. Market & Funding Insights Report
-6. Growth Potential Report
-7. SWOT Analysis Report
-
-Pipeline Steps (Aggregate Summaries):
-8. Company Overview Summary
-9. Technology & Product Summary
-10. Market Demand Summary
-11. Competitor Summary
-12. Market & Funding Summary
-13. Growth Potential Summary
-14. SWOT Summary
+Pipeline Steps:
+1. Flash Analysis (2-page) - High-signal market flash report
+2. Company Deep Dive (per company) - Comprehensive due diligence 
+3. Executive Summary (5-page) - Strategic landscape assessment
 """
 import logging
 import time
@@ -38,19 +23,12 @@ logger = logging.getLogger(__name__)
 
 class TracxnAnalysisPipeline:
     """
-    Main pipeline for analyzing Tracxn startup data through 14 AI steps.
+    Main pipeline for analyzing Tracxn startup data through 3 institutional-grade AI steps.
     
-    Per-Company Analysis (7 types):
-    1. Company Overview
-    2. Technology & Product
-    3. Market Demand
-    4. Competitor Identification
-    5. Market & Funding Insights
-    6. Growth Potential
-    7. SWOT Analysis
-    
-    Aggregate Summaries (7 summaries):
-    8-14. Summaries for each analysis type
+    Pipeline Steps:
+    1. Flash Analysis - 2-page market flash report with outliers and signals
+    2. Company Deep Dive - Comprehensive due diligence per company
+    3. Executive Summary - 5-page strategic landscape assessment
     """
     
     def __init__(
@@ -89,7 +67,7 @@ class TracxnAnalysisPipeline:
         
         logger.info(f"Initialized TracxnAnalysisPipeline with model: {self.model}")
     
-    async def _call_ai(self, prompt: str, max_tokens: int = 3000) -> str:
+    async def _call_ai(self, prompt: str, max_tokens: int = 4000) -> str:
         """Call OpenAI API with the given prompt."""
         try:
             response = await self.client.chat.completions.create(
@@ -117,7 +95,7 @@ class TracxnAnalysisPipeline:
         max_companies: int = 15
     ) -> Dict[str, Any]:
         """
-        Run the complete 14-step analysis pipeline.
+        Run the complete 3-step analysis pipeline.
         
         Args:
             companies: List of company data dictionaries from Tracxn scraper
@@ -132,264 +110,66 @@ class TracxnAnalysisPipeline:
         companies_to_analyze = companies[:max_companies]
         num_companies = len(companies_to_analyze)
         
-        logger.info(f"Starting Tracxn 14-step analysis for {num_companies} companies")
+        logger.info(f"Starting Tracxn 3-step institutional analysis for {num_companies} companies")
         
         result = {
             'company_count': num_companies,
-            # Per-company reports
-            'company_overview_reports': [],
-            'tech_product_reports': [],
-            'market_demand_reports': [],
-            'competitor_reports': [],
-            'market_funding_reports': [],
-            'growth_potential_reports': [],
-            'swot_reports': [],
-            # Summaries
-            'company_overview_summary': '',
-            'tech_product_summary': '',
-            'market_demand_summary': '',
-            'competitor_summary': '',
-            'market_funding_summary': '',
-            'growth_potential_summary': '',
-            'swot_summary': '',
+            # New 3-step structure
+            'flash_analysis': '',
+            'company_reports': [],
+            'executive_summary': '',
             # Metadata
             'processing_time': 0,
             'generated_at': datetime.now().isoformat(),
         }
         
         try:
-            # ===== Per-Company Analysis (Steps 1-7) =====
+            # ===== Step 1: Flash Analysis (2-page) =====
+            logger.info("Step 1/3: Generating Flash Analysis Report...")
+            await self._update_progress("flash_analysis", "Generating 2-page market flash report", 10)
             
-            # Step 1: Company Overview Reports
-            logger.info("Step 1/14: Generating company overview reports...")
-            await self._update_progress("company_overview", "Generating company overviews", 5)
+            prompt = self.prompts.generate_flash_analysis_report(
+                companies_to_analyze, 
+                self.target_market_description
+            )
+            result['flash_analysis'] = await self._call_ai(prompt, max_tokens=3000)
+            
+            # ===== Step 2: Company Deep Dive (per company) =====
+            logger.info("Step 2/3: Generating Company Deep Dive Reports...")
+            await self._update_progress("company_deep_dive", "Generating comprehensive due diligence", 25)
             
             for i, company in enumerate(companies_to_analyze):
                 company_name = company.get('name', company.get('Company Name', f'Company {i+1}'))
                 try:
-                    prompt = self.prompts.generate_company_overview(
+                    prompt = self.prompts.generate_comprehensive_company_analysis(
                         company, self.target_market_description
                     )
-                    report = await self._call_ai(prompt)
-                    result['company_overview_reports'].append({
+                    report = await self._call_ai(prompt, max_tokens=4000)
+                    result['company_reports'].append({
                         'company_name': company_name,
                         'content': report
                     })
                 except Exception as e:
-                    logger.error(f"Company overview failed for {company_name}: {e}")
-                    result['company_overview_reports'].append({
+                    logger.error(f"Company deep dive failed for {company_name}: {e}")
+                    result['company_reports'].append({
                         'company_name': company_name,
                         'content': f"Analysis error: {str(e)}"
                     })
             
-            # Step 2: Technology & Product Reports
-            logger.info("Step 2/14: Generating technology & product reports...")
-            await self._update_progress("tech_product", "Analyzing technology and products", 12)
+            # ===== Step 3: Executive Summary (5-page) =====
+            logger.info("Step 3/3: Generating Executive Summary...")
+            await self._update_progress("executive_summary", "Generating 5-page strategic assessment", 85)
             
-            for i, company in enumerate(companies_to_analyze):
-                company_name = company.get('name', company.get('Company Name', f'Company {i+1}'))
-                try:
-                    prompt = self.prompts.generate_tech_product_report(
-                        company, self.target_market_description
-                    )
-                    report = await self._call_ai(prompt)
-                    result['tech_product_reports'].append({
-                        'company_name': company_name,
-                        'content': report
-                    })
-                except Exception as e:
-                    logger.error(f"Tech product report failed for {company_name}: {e}")
-                    result['tech_product_reports'].append({
-                        'company_name': company_name,
-                        'content': f"Analysis error: {str(e)}"
-                    })
-            
-            # Step 3: Market Demand Reports
-            logger.info("Step 3/14: Generating market demand reports...")
-            await self._update_progress("market_demand", "Analyzing market demand and traction", 19)
-            
-            for i, company in enumerate(companies_to_analyze):
-                company_name = company.get('name', company.get('Company Name', f'Company {i+1}'))
-                try:
-                    prompt = self.prompts.generate_market_demand_report(
-                        company, self.target_market_description
-                    )
-                    report = await self._call_ai(prompt)
-                    result['market_demand_reports'].append({
-                        'company_name': company_name,
-                        'content': report
-                    })
-                except Exception as e:
-                    logger.error(f"Market demand report failed for {company_name}: {e}")
-                    result['market_demand_reports'].append({
-                        'company_name': company_name,
-                        'content': f"Analysis error: {str(e)}"
-                    })
-            
-            # Step 4: Competitor Identification Reports
-            logger.info("Step 4/14: Generating competitor identification reports...")
-            await self._update_progress("competitor", "Analyzing competitive landscape", 26)
-            
-            for i, company in enumerate(companies_to_analyze):
-                company_name = company.get('name', company.get('Company Name', f'Company {i+1}'))
-                try:
-                    prompt = self.prompts.generate_competitor_report(
-                        company, self.target_market_description
-                    )
-                    report = await self._call_ai(prompt)
-                    result['competitor_reports'].append({
-                        'company_name': company_name,
-                        'content': report
-                    })
-                except Exception as e:
-                    logger.error(f"Competitor report failed for {company_name}: {e}")
-                    result['competitor_reports'].append({
-                        'company_name': company_name,
-                        'content': f"Analysis error: {str(e)}"
-                    })
-            
-            # Step 5: Market & Funding Insights Reports
-            logger.info("Step 5/14: Generating market & funding insights reports...")
-            await self._update_progress("market_funding", "Analyzing funding patterns", 33)
-            
-            for i, company in enumerate(companies_to_analyze):
-                company_name = company.get('name', company.get('Company Name', f'Company {i+1}'))
-                try:
-                    prompt = self.prompts.generate_market_funding_report(
-                        company, self.target_market_description
-                    )
-                    report = await self._call_ai(prompt)
-                    result['market_funding_reports'].append({
-                        'company_name': company_name,
-                        'content': report
-                    })
-                except Exception as e:
-                    logger.error(f"Market funding report failed for {company_name}: {e}")
-                    result['market_funding_reports'].append({
-                        'company_name': company_name,
-                        'content': f"Analysis error: {str(e)}"
-                    })
-            
-            # Step 6: Growth Potential Reports
-            logger.info("Step 6/14: Generating growth potential reports...")
-            await self._update_progress("growth_potential", "Evaluating growth potential", 40)
-            
-            for i, company in enumerate(companies_to_analyze):
-                company_name = company.get('name', company.get('Company Name', f'Company {i+1}'))
-                try:
-                    prompt = self.prompts.generate_growth_potential_report(
-                        company, self.target_market_description
-                    )
-                    report = await self._call_ai(prompt)
-                    result['growth_potential_reports'].append({
-                        'company_name': company_name,
-                        'content': report
-                    })
-                except Exception as e:
-                    logger.error(f"Growth potential report failed for {company_name}: {e}")
-                    result['growth_potential_reports'].append({
-                        'company_name': company_name,
-                        'content': f"Analysis error: {str(e)}"
-                    })
-            
-            # Step 7: SWOT Analysis Reports
-            logger.info("Step 7/14: Generating SWOT analysis reports...")
-            await self._update_progress("swot", "Performing SWOT analysis", 47)
-            
-            for i, company in enumerate(companies_to_analyze):
-                company_name = company.get('name', company.get('Company Name', f'Company {i+1}'))
-                try:
-                    prompt = self.prompts.generate_swot_report(
-                        company, self.target_market_description
-                    )
-                    report = await self._call_ai(prompt)
-                    result['swot_reports'].append({
-                        'company_name': company_name,
-                        'content': report
-                    })
-                except Exception as e:
-                    logger.error(f"SWOT report failed for {company_name}: {e}")
-                    result['swot_reports'].append({
-                        'company_name': company_name,
-                        'content': f"Analysis error: {str(e)}"
-                    })
-            
-            # ===== Aggregate Summaries (Steps 8-14) =====
-            
-            # Step 8: Company Overview Summary
-            logger.info("Step 8/14: Generating company overview summary...")
-            await self._update_progress("summaries", "Generating executive summaries (1/7)", 54)
-            
-            overview_texts = [r['content'] for r in result['company_overview_reports']]
-            prompt = self.prompts.generate_company_overview_summary(
-                overview_texts, num_companies, self.target_market_description
+            report_texts = [r['content'] for r in result['company_reports']]
+            prompt = self.prompts.generate_executive_summary(
+                report_texts, num_companies, self.target_market_description
             )
-            result['company_overview_summary'] = await self._call_ai(prompt, max_tokens=4000)
-            
-            # Step 9: Technology & Product Summary
-            logger.info("Step 9/14: Generating technology & product summary...")
-            await self._update_progress("summaries", "Generating executive summaries (2/7)", 61)
-            
-            tech_texts = [r['content'] for r in result['tech_product_reports']]
-            prompt = self.prompts.generate_tech_product_summary(
-                tech_texts, num_companies, self.target_market_description
-            )
-            result['tech_product_summary'] = await self._call_ai(prompt, max_tokens=4000)
-            
-            # Step 10: Market Demand Summary
-            logger.info("Step 10/14: Generating market demand summary...")
-            await self._update_progress("summaries", "Generating executive summaries (3/7)", 68)
-            
-            demand_texts = [r['content'] for r in result['market_demand_reports']]
-            prompt = self.prompts.generate_market_demand_summary(
-                demand_texts, num_companies, self.target_market_description
-            )
-            result['market_demand_summary'] = await self._call_ai(prompt, max_tokens=4000)
-            
-            # Step 11: Competitor Summary
-            logger.info("Step 11/14: Generating competitor summary...")
-            await self._update_progress("summaries", "Generating executive summaries (4/7)", 75)
-            
-            competitor_texts = [r['content'] for r in result['competitor_reports']]
-            prompt = self.prompts.generate_competitor_summary(
-                competitor_texts, num_companies, self.target_market_description
-            )
-            result['competitor_summary'] = await self._call_ai(prompt, max_tokens=4000)
-            
-            # Step 12: Market & Funding Summary
-            logger.info("Step 12/14: Generating market & funding summary...")
-            await self._update_progress("summaries", "Generating executive summaries (5/7)", 82)
-            
-            market_texts = [r['content'] for r in result['market_funding_reports']]
-            prompt = self.prompts.generate_market_funding_summary(
-                market_texts, num_companies, self.target_market_description
-            )
-            result['market_funding_summary'] = await self._call_ai(prompt, max_tokens=4000)
-            
-            # Step 13: Growth Potential Summary
-            logger.info("Step 13/14: Generating growth potential summary...")
-            await self._update_progress("summaries", "Generating executive summaries (6/7)", 89)
-            
-            growth_texts = [r['content'] for r in result['growth_potential_reports']]
-            prompt = self.prompts.generate_growth_potential_summary(
-                growth_texts, num_companies, self.target_market_description
-            )
-            result['growth_potential_summary'] = await self._call_ai(prompt, max_tokens=4000)
-            
-            # Step 14: SWOT Summary
-            logger.info("Step 14/14: Generating SWOT summary...")
-            await self._update_progress("summaries", "Generating executive summaries (7/7)", 96)
-            
-            swot_texts = [r['content'] for r in result['swot_reports']]
-            prompt = self.prompts.generate_swot_summary(
-                swot_texts, num_companies, self.target_market_description
-            )
-            result['swot_summary'] = await self._call_ai(prompt, max_tokens=4000)
+            result['executive_summary'] = await self._call_ai(prompt, max_tokens=5000)
             
             # Calculate processing time
             result['processing_time'] = time.time() - start_time
             
-            logger.info(f"Tracxn 14-step analysis completed in {result['processing_time']:.2f}s")
+            logger.info(f"Tracxn 3-step analysis completed in {result['processing_time']:.2f}s")
             
             return result
             
@@ -548,6 +328,16 @@ def generate_tracxn_html(result: Dict[str, Any], startup_name: str = "Your Start
             color: var(--text-primary);
         }}
         
+        .flash-section {{
+            background: linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, rgba(99, 102, 241, 0.1) 100%);
+            border-left: 4px solid var(--accent);
+        }}
+        
+        .executive-section {{
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(99, 102, 241, 0.1) 100%);
+            border-left: 4px solid var(--secondary);
+        }}
+        
         .company-report {{
             background: rgba(99, 102, 241, 0.1);
             border-radius: 8px;
@@ -559,11 +349,6 @@ def generate_tracxn_html(result: Dict[str, Any], startup_name: str = "Your Start
         .company-report h4 {{
             color: var(--text-primary);
             margin-bottom: 1rem;
-        }}
-        
-        .summary-section {{
-            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(99, 102, 241, 0.1) 100%);
-            border-left: 4px solid var(--secondary);
         }}
         
         table {{
@@ -618,7 +403,7 @@ def generate_tracxn_html(result: Dict[str, Any], startup_name: str = "Your Start
     <div class="container">
         <header>
             <h1>🔍 Tracxn Market Analysis</h1>
-            <p class="subtitle">Comprehensive startup landscape analysis for {startup_name}</p>
+            <p class="subtitle">Institutional-Grade Startup Landscape Analysis for {startup_name}</p>
             <div class="stats">
                 <div class="stat">
                     <div class="stat-value">{result.get('company_count', 0)}</div>
@@ -629,160 +414,51 @@ def generate_tracxn_html(result: Dict[str, Any], startup_name: str = "Your Start
                     <div class="stat-label">Processing Time</div>
                 </div>
                 <div class="stat">
-                    <div class="stat-value">14</div>
+                    <div class="stat-value">3</div>
                     <div class="stat-label">Analysis Steps</div>
                 </div>
             </div>
         </header>
 """)
     
-    # Executive Summaries Section
-    html_parts.append("""
-        <div class="section summary-section">
-            <h2>📋 Executive Summaries</h2>
-""")
-    
-    # Company Overview Summary
-    if result.get('company_overview_summary'):
+    # Flash Analysis Section
+    if result.get('flash_analysis'):
         html_parts.append(f"""
-            <h3>📊 Market Overview</h3>
-            {md_to_html(result['company_overview_summary'])}
+        <div class="section flash-section">
+            <h2>⚡ Flash Analysis Report</h2>
+            {md_to_html(result['flash_analysis'])}
+        </div>
 """)
     
-    # Tech & Product Summary
-    if result.get('tech_product_summary'):
+    # Executive Summary Section
+    if result.get('executive_summary'):
         html_parts.append(f"""
-            <h3>💻 Technology & Product Landscape</h3>
-            {md_to_html(result['tech_product_summary'])}
+        <div class="section executive-section">
+            <h2>🦅 Executive Strategic Assessment</h2>
+            {md_to_html(result['executive_summary'])}
+        </div>
 """)
     
-    # Market Demand Summary
-    if result.get('market_demand_summary'):
-        html_parts.append(f"""
-            <h3>📈 Market Demand & Traction</h3>
-            {md_to_html(result['market_demand_summary'])}
-""")
-    
-    # Competitor Summary
-    if result.get('competitor_summary'):
-        html_parts.append(f"""
-            <h3>🎯 Competitive Landscape</h3>
-            {md_to_html(result['competitor_summary'])}
-""")
-    
-    # Market & Funding Summary
-    if result.get('market_funding_summary'):
-        html_parts.append(f"""
-            <h3>💰 Funding Insights</h3>
-            {md_to_html(result['market_funding_summary'])}
-""")
-    
-    # Growth Potential Summary
-    if result.get('growth_potential_summary'):
-        html_parts.append(f"""
-            <h3>🚀 Growth Potential</h3>
-            {md_to_html(result['growth_potential_summary'])}
-""")
-    
-    # SWOT Summary
-    if result.get('swot_summary'):
-        html_parts.append(f"""
-            <h3>⚖️ Strategic SWOT Landscape</h3>
-            {md_to_html(result['swot_summary'])}
-""")
-    
-    html_parts.append("</div>")  # Close summaries section
-    
-    # Per-Company Reports Section
-    html_parts.append("""
+    # Company Deep Dive Reports Section
+    if result.get('company_reports'):
+        html_parts.append("""
         <div class="section">
-            <h2>📊 Individual Company Analysis</h2>
+            <h2>📊 Company Deep Dive Reports</h2>
 """)
-    
-    # Company Overview Reports
-    if result.get('company_overview_reports'):
-        html_parts.append("<h3>📊 Company Overviews</h3>")
-        for report in result['company_overview_reports']:
+        for report in result['company_reports']:
             html_parts.append(f"""
             <div class="company-report">
                 <h4>{report['company_name']}</h4>
                 {md_to_html(report['content'])}
             </div>
 """)
-    
-    # Tech & Product Reports
-    if result.get('tech_product_reports'):
-        html_parts.append("<h3>💻 Technology & Product Reports</h3>")
-        for report in result['tech_product_reports']:
-            html_parts.append(f"""
-            <div class="company-report">
-                <h4>{report['company_name']}</h4>
-                {md_to_html(report['content'])}
-            </div>
-""")
-    
-    # Market Demand Reports
-    if result.get('market_demand_reports'):
-        html_parts.append("<h3>📈 Market Demand Reports</h3>")
-        for report in result['market_demand_reports']:
-            html_parts.append(f"""
-            <div class="company-report">
-                <h4>{report['company_name']}</h4>
-                {md_to_html(report['content'])}
-            </div>
-""")
-    
-    # Competitor Reports
-    if result.get('competitor_reports'):
-        html_parts.append("<h3>🎯 Competitive Intelligence Reports</h3>")
-        for report in result['competitor_reports']:
-            html_parts.append(f"""
-            <div class="company-report">
-                <h4>{report['company_name']}</h4>
-                {md_to_html(report['content'])}
-            </div>
-""")
-    
-    # Market & Funding Reports
-    if result.get('market_funding_reports'):
-        html_parts.append("<h3>💰 Funding Reports</h3>")
-        for report in result['market_funding_reports']:
-            html_parts.append(f"""
-            <div class="company-report">
-                <h4>{report['company_name']}</h4>
-                {md_to_html(report['content'])}
-            </div>
-""")
-    
-    # Growth Potential Reports
-    if result.get('growth_potential_reports'):
-        html_parts.append("<h3>🚀 Growth Potential Reports</h3>")
-        for report in result['growth_potential_reports']:
-            html_parts.append(f"""
-            <div class="company-report">
-                <h4>{report['company_name']}</h4>
-                {md_to_html(report['content'])}
-            </div>
-""")
-    
-    # SWOT Reports
-    if result.get('swot_reports'):
-        html_parts.append("<h3>⚖️ SWOT Analysis Reports</h3>")
-        for report in result['swot_reports']:
-            html_parts.append(f"""
-            <div class="company-report">
-                <h4>{report['company_name']}</h4>
-                {md_to_html(report['content'])}
-            </div>
-""")
-    
-    html_parts.append("</div>")  # Close per-company section
+        html_parts.append("</div>")
     
     # Footer
     html_parts.append(f"""
         <footer>
             <p>Generated by Market Navigator • {result.get('generated_at', datetime.now().isoformat())}</p>
-            <p>Powered by Tracxn Data & 14-Step AI Analysis</p>
+            <p>Powered by Tracxn Data & 3-Step Institutional AI Analysis</p>
         </footer>
     </div>
 </body>

@@ -973,24 +973,18 @@ def generate_social_report(self, report_id, user_id):
 @shared_task(bind=True, queue='reports')
 def generate_tracxn_report(self, report_id, user_id):
     """
-    Generate Tracxn analysis report using 14-step AI pipeline.
-    Per FINAL_ARCHITECTURE - Panel 2: Tracxn Analysis
+    Generate Tracxn analysis report using 3-step institutional-grade AI pipeline.
     
     Pipeline Steps:
     1. Initialize & Generate Tracxn Keywords
     2. Search Tracxn API via Orchestrator
     3. Rank Results by Similarity
     4. Fetch Startup Details
-    5. Company Overview Analysis (per startup)
-    6. Technology & Product Analysis (per startup)
-    7. Market Demand Analysis (per startup)
-    8. Competitor Analysis (per startup)
-    9. Market & Funding Analysis (per startup)
-    10. Growth Potential Analysis (per startup)
-    11. SWOT Analysis (per startup)
-    12. Executive Summaries (7 summaries)
-    13. Generate HTML Report
-    14. Save Report to DB and S3
+    5. Flash Analysis (2-page market flash report)
+    6. Company Deep Dive (comprehensive due diligence per company)
+    7. Executive Summary (5-page strategic assessment)
+    8. Generate HTML Report
+    9. Save Report to DB and S3
     """
     from .models import Report, ReportVersion, ReportAnalysisSection
     from .progress_tracker import ReportProgressTracker
@@ -1202,9 +1196,9 @@ def generate_tracxn_report(self, report_id, user_id):
         )
         tracker.complete_step('fetching_details', {'startups_processed': len(startups_for_analysis)})
         
-        # ===== Steps 5-11: Run AI Analysis Pipeline =====
+        # ===== Steps 5-7: Run 3-Step Institutional AI Analysis Pipeline =====
         async def run_analysis_with_tracking():
-            """Run analysis pipeline with step-by-step progress updates."""
+            """Run 3-step institutional analysis pipeline with progress updates."""
             from asgiref.sync import sync_to_async
             
             start_step = sync_to_async(tracker.start_step, thread_sensitive=True)
@@ -1217,175 +1211,52 @@ def generate_tracxn_report(self, report_id, user_id):
             
             num_startups = len(startups_for_analysis)
             
-            # Step 5: Company Overview
-            await start_step('company_overview')
-            company_overview_reports = []
+            # Step 5: Flash Analysis (2-page market flash report)
+            await start_step('flash_analysis')
+            try:
+                prompt = pipeline.prompts.generate_flash_analysis_report(
+                    startups_for_analysis, target_description
+                )
+                flash_analysis = await pipeline._call_ai(prompt, max_tokens=3000)
+            except Exception as e:
+                logger.error(f"Flash analysis failed: {e}")
+                flash_analysis = f"Analysis error: {str(e)}"
+            await complete_step('flash_analysis', {'report_generated': True})
+            
+            # Step 6: Company Deep Dive (per company comprehensive analysis)
+            await start_step('company_deep_dive')
+            company_reports = []
             for startup in startups_for_analysis:
                 startup_name = startup.get('name', 'Unknown')
                 try:
-                    prompt = pipeline.prompts.generate_company_overview(startup, target_description)
-                    content = await pipeline._call_ai(prompt)
-                    company_overview_reports.append({'company_name': startup_name, 'content': content})
+                    prompt = pipeline.prompts.generate_comprehensive_company_analysis(
+                        startup, target_description
+                    )
+                    content = await pipeline._call_ai(prompt, max_tokens=4000)
+                    company_reports.append({'company_name': startup_name, 'content': content})
                 except Exception as e:
-                    logger.error(f"Company overview failed for {startup_name}: {e}")
-                    company_overview_reports.append({'company_name': startup_name, 'content': f"Analysis error: {str(e)}"})
-            await complete_step('company_overview', {'startups_analyzed': len(company_overview_reports)})
-
-            # Step 6: Technology & Product
-            await start_step('tech_product')
-            tech_product_reports = []
-            for startup in startups_for_analysis:
-                startup_name = startup.get('name', 'Unknown')
-                try:
-                    prompt = pipeline.prompts.generate_tech_product_report(startup, target_description)
-                    content = await pipeline._call_ai(prompt)
-                    tech_product_reports.append({'company_name': startup_name, 'content': content})
-                except Exception as e:
-                    logger.error(f"Tech analysis failed for {startup_name}: {e}")
-                    tech_product_reports.append({'company_name': startup_name, 'content': f"Analysis error: {str(e)}"})
-            await complete_step('tech_product', {'startups_analyzed': len(tech_product_reports)})
-
-            # Step 7: Market Demand
-            await start_step('market_demand')
-            market_demand_reports = []
-            for startup in startups_for_analysis:
-                startup_name = startup.get('name', 'Unknown')
-                try:
-                    prompt = pipeline.prompts.generate_market_demand_report(startup, target_description)
-                    content = await pipeline._call_ai(prompt)
-                    market_demand_reports.append({'company_name': startup_name, 'content': content})
-                except Exception as e:
-                    logger.error(f"Market demand analysis failed for {startup_name}: {e}")
-                    market_demand_reports.append({'company_name': startup_name, 'content': f"Analysis error: {str(e)}"})
-            await complete_step('market_demand', {'startups_analyzed': len(market_demand_reports)})
+                    logger.error(f"Company deep dive failed for {startup_name}: {e}")
+                    company_reports.append({'company_name': startup_name, 'content': f"Analysis error: {str(e)}"})
+            await complete_step('company_deep_dive', {'startups_analyzed': len(company_reports)})
             
-            # Step 8: Competitor Analysis
-            await start_step('competitor')
-            competitor_reports = []
-            for startup in startups_for_analysis:
-                startup_name = startup.get('name', 'Unknown')
-                try:
-                    prompt = pipeline.prompts.generate_competitor_report(startup, target_description)
-                    content = await pipeline._call_ai(prompt)
-                    competitor_reports.append({'company_name': startup_name, 'content': content})
-                except Exception as e:
-                    logger.error(f"Competitor analysis failed for {startup_name}: {e}")
-                    competitor_reports.append({'company_name': startup_name, 'content': f"Analysis error: {str(e)}"})
-            await complete_step('competitor', {'startups_analyzed': len(competitor_reports)})
-            
-            # Step 9: Market & Funding Analysis
-            await start_step('market_funding')
-            market_funding_reports = []
-            for startup in startups_for_analysis:
-                startup_name = startup.get('name', 'Unknown')
-                try:
-                    prompt = pipeline.prompts.generate_market_funding_report(startup, target_description)
-                    content = await pipeline._call_ai(prompt)
-                    market_funding_reports.append({'company_name': startup_name, 'content': content})
-                except Exception as e:
-                    logger.error(f"Market funding analysis failed for {startup_name}: {e}")
-                    market_funding_reports.append({'company_name': startup_name, 'content': f"Analysis error: {str(e)}"})
-            await complete_step('market_funding', {'startups_analyzed': len(market_funding_reports)})
-            
-            # Step 10: Growth Potential Analysis
-            await start_step('growth_potential')
-            growth_potential_reports = []
-            for startup in startups_for_analysis:
-                startup_name = startup.get('name', 'Unknown')
-                try:
-                    prompt = pipeline.prompts.generate_growth_potential_report(startup, target_description)
-                    content = await pipeline._call_ai(prompt)
-                    growth_potential_reports.append({'company_name': startup_name, 'content': content})
-                except Exception as e:
-                    logger.error(f"Growth potential analysis failed for {startup_name}: {e}")
-                    growth_potential_reports.append({'company_name': startup_name, 'content': f"Analysis error: {str(e)}"})
-            await complete_step('growth_potential', {'startups_analyzed': len(growth_potential_reports)})
-            
-            # Step 11: SWOT Analysis
-            await start_step('swot')
-            swot_reports = []
-            for startup in startups_for_analysis:
-                startup_name = startup.get('name', 'Unknown')
-                try:
-                    prompt = pipeline.prompts.generate_swot_report(startup, target_description)
-                    content = await pipeline._call_ai(prompt)
-                    swot_reports.append({'company_name': startup_name, 'content': content})
-                except Exception as e:
-                    logger.error(f"SWOT analysis failed for {startup_name}: {e}")
-                    swot_reports.append({'company_name': startup_name, 'content': f"Analysis error: {str(e)}"})
-            await complete_step('swot', {'startups_analyzed': len(swot_reports)})
-
-            # Step 12: Executive Summaries
-            await start_step('summaries')
-            summaries = {}
-            
-            # Company Overview Summary
-            overview_texts = [r['content'] for r in company_overview_reports]
-            summaries['company_overview_summary'] = await pipeline._call_ai(
-                pipeline.prompts.generate_company_overview_summary(overview_texts, num_startups, target_description),
-                max_tokens=4000
-            )
-
-            # Tech & Product Summary
-            tech_texts = [r['content'] for r in tech_product_reports]
-            summaries['tech_product_summary'] = await pipeline._call_ai(
-                pipeline.prompts.generate_tech_product_summary(tech_texts, num_startups, target_description),
-                max_tokens=4000
-            )
-
-            # Market Demand Summary
-            demand_texts = [r['content'] for r in market_demand_reports]
-            summaries['market_demand_summary'] = await pipeline._call_ai(
-                pipeline.prompts.generate_market_demand_summary(demand_texts, num_startups, target_description),
-                max_tokens=4000
-            )
-
-            # Competitor Summary
-            competitor_texts = [r['content'] for r in competitor_reports]
-            summaries['competitor_summary'] = await pipeline._call_ai(
-                pipeline.prompts.generate_competitor_summary(competitor_texts, num_startups, target_description),
-                max_tokens=4000
-            )
-            
-            # Market Funding Summary
-            market_texts = [r['content'] for r in market_funding_reports]
-            summaries['market_funding_summary'] = await pipeline._call_ai(
-                pipeline.prompts.generate_market_funding_summary(market_texts, num_startups, target_description),
-                max_tokens=4000
-            )
-            
-            # Growth Potential Summary
-            growth_texts = [r['content'] for r in growth_potential_reports]
-            summaries['growth_potential_summary'] = await pipeline._call_ai(
-                pipeline.prompts.generate_growth_potential_summary(growth_texts, num_startups, target_description),
-                max_tokens=4000
-            )
-
-            # SWOT Summary
-            swot_texts = [r['content'] for r in swot_reports]
-            summaries['swot_summary'] = await pipeline._call_ai(
-                pipeline.prompts.generate_swot_summary(swot_texts, num_startups, target_description),
-                max_tokens=4000
-            )
-            
-            await complete_step('summaries', {'summaries_generated': len(summaries)})
+            # Step 7: Executive Summary (5-page strategic assessment)
+            await start_step('executive_summary')
+            try:
+                report_texts = [r['content'] for r in company_reports]
+                prompt = pipeline.prompts.generate_executive_summary(
+                    report_texts, num_startups, target_description
+                )
+                executive_summary = await pipeline._call_ai(prompt, max_tokens=5000)
+            except Exception as e:
+                logger.error(f"Executive summary failed: {e}")
+                executive_summary = f"Analysis error: {str(e)}"
+            await complete_step('executive_summary', {'summary_generated': True})
             
             return {
-                'competitor_reports': competitor_reports,
-                'market_funding_reports': market_funding_reports,
-                'growth_potential_reports': growth_potential_reports,
-                'competitor_summary': summaries['competitor_summary'],
-                'market_funding_summary': summaries['market_funding_summary'],
-                'growth_potential_summary': summaries['growth_potential_summary'],
                 'company_count': num_startups,
-                'company_overview_reports': company_overview_reports,
-                'tech_product_reports': tech_product_reports,
-                'market_demand_reports': market_demand_reports,
-                'swot_reports': swot_reports,
-                'company_overview_summary': summaries['company_overview_summary'],
-                'tech_product_summary': summaries['tech_product_summary'],
-                'market_demand_summary': summaries['market_demand_summary'],
-                'swot_summary': summaries['swot_summary'],
+                'flash_analysis': flash_analysis,
+                'company_reports': company_reports,
+                'executive_summary': executive_summary,
             }
         
         # Run the analysis
@@ -1396,27 +1267,16 @@ def generate_tracxn_report(self, report_id, user_id):
         finally:
             loop.close()
         
-        # ===== Step 9: Generate HTML =====
+        # ===== Step 8: Generate HTML =====
         tracker.start_step('html_gen')
         
-        # Format result for HTML generator
+        # Format result for HTML generator (new 3-step structure)
         formatted_result = {
             'company_count': analysis_result['company_count'],
             'processing_time': 0,
-            'competitor_reports': analysis_result['competitor_reports'],
-            'market_funding_reports': analysis_result['market_funding_reports'],
-            'growth_potential_reports': analysis_result['growth_potential_reports'],
-            'competitor_summary': analysis_result['competitor_summary'],
-            'market_funding_summary': analysis_result['market_funding_summary'],
-            'growth_potential_summary': analysis_result['growth_potential_summary'],
-            'company_overview_reports': analysis_result['company_overview_reports'],
-            'tech_product_reports': analysis_result['tech_product_reports'],
-            'market_demand_reports': analysis_result['market_demand_reports'],
-            'swot_reports': analysis_result['swot_reports'],
-            'company_overview_summary': analysis_result['company_overview_summary'],
-            'tech_product_summary': analysis_result['tech_product_summary'],
-            'market_demand_summary': analysis_result['market_demand_summary'],
-            'swot_summary': analysis_result['swot_summary'],
+            'flash_analysis': analysis_result['flash_analysis'],
+            'company_reports': analysis_result['company_reports'],
+            'executive_summary': analysis_result['executive_summary'],
         }
         
         html_content = generate_tracxn_html(
@@ -1426,88 +1286,85 @@ def generate_tracxn_report(self, report_id, user_id):
         
         tracker.complete_step('html_gen', {'html_size': len(html_content)})
         
-        # ===== Step 10: Save =====
+        # ===== Step 9: Save =====
         tracker.start_step('save')
         
         # Save analysis sections to database
         section_order = 0
         
-        # Save analysis sections (Dual-Write: DB + S3)
-        section_mapping = [
-            ('company_overview', 'company_overview_reports'),
-            ('tech_product', 'tech_product_reports'),
-            ('market_demand', 'market_demand_reports'),
-            ('competitor', 'competitor_reports'),
-            ('market_funding', 'market_funding_reports'),
-            ('growth_potential', 'growth_potential_reports'),
-            ('swot', 'swot_reports'),
-        ]
-
-        for section_type, result_key in section_mapping:
-            for report_item in analysis_result.get(result_key, []):
-                # 1. Save to DB
-                ReportAnalysisSection.objects.create(
-                    report=report,
-                    section_type=section_type,
-                    company_name=report_item['company_name'],
-                    content_markdown=report_item['content'],
-                    order=section_order
-                )
-                section_order += 1
-                
-                # 2. Save to S3
-                if getattr(settings, 'USE_S3', False):
-                    try:
-                        org_id = str(project.organization_id) if project.organization_id else 'default'
-                        report_storage.save_analysis_section(
-                            project_id=str(project.id),
-                            org_id=org_id,
-                            version=report.current_version + 1,
-                            section_type=section_type,
-                            content=report_item['content'],
-                            company_name=report_item['company_name'],
-                            report_type='tracxn'
-                        )
-                    except Exception as e:
-                        logger.warning(f"S3 section save failed for {section_type}: {e}")
+        # Save Flash Analysis (Dual-Write: DB + S3)
+        if analysis_result.get('flash_analysis'):
+            ReportAnalysisSection.objects.create(
+                report=report,
+                section_type='flash_analysis',
+                content_markdown=analysis_result['flash_analysis'],
+                order=section_order
+            )
+            section_order += 1
+            
+            if getattr(settings, 'USE_S3', False):
+                try:
+                    org_id = str(project.organization_id) if project.organization_id else 'default'
+                    report_storage.save_analysis_section(
+                        project_id=str(project.id),
+                        org_id=org_id,
+                        version=report.current_version + 1,
+                        section_type='flash_analysis',
+                        content=analysis_result['flash_analysis'],
+                        report_type='tracxn'
+                    )
+                except Exception as e:
+                    logger.warning(f"S3 flash analysis save failed: {e}")
         
-        # Save all 7 summaries
-        summary_types = [
-            ('company_overview_summary', 'company_overview_summary'),
-            ('tech_product_summary', 'tech_product_summary'),
-            ('market_demand_summary', 'market_demand_summary'),
-            ('competitor_summary', 'competitor_summary'),
-            ('market_funding_summary', 'market_funding_summary'),
-            ('growth_potential_summary', 'growth_potential_summary'),
-            ('swot_summary', 'swot_summary'),
-        ]
+        # Save Company Deep Dive Reports (Dual-Write: DB + S3)
+        for report_item in analysis_result.get('company_reports', []):
+            ReportAnalysisSection.objects.create(
+                report=report,
+                section_type='company_deep_dive',
+                company_name=report_item['company_name'],
+                content_markdown=report_item['content'],
+                order=section_order
+            )
+            section_order += 1
+            
+            if getattr(settings, 'USE_S3', False):
+                try:
+                    org_id = str(project.organization_id) if project.organization_id else 'default'
+                    report_storage.save_analysis_section(
+                        project_id=str(project.id),
+                        org_id=org_id,
+                        version=report.current_version + 1,
+                        section_type='company_deep_dive',
+                        content=report_item['content'],
+                        company_name=report_item['company_name'],
+                        report_type='tracxn'
+                    )
+                except Exception as e:
+                    logger.warning(f"S3 company deep dive save failed for {report_item['company_name']}: {e}")
         
-        for result_key, section_type in summary_types:
-            content = analysis_result.get(result_key, '')
-            if content:
-                # 1. Save to DB
-                ReportAnalysisSection.objects.create(
-                    report=report,
-                    section_type=section_type,
-                    content_markdown=content,
-                    order=section_order
-                )
-                section_order += 1
-                
-                # 2. Save to S3
-                if getattr(settings, 'USE_S3', False):
-                    try:
-                        org_id = str(project.organization_id) if project.organization_id else 'default'
-                        report_storage.save_analysis_summary(
-                            project_id=str(project.id),
-                            org_id=org_id,
-                            version=report.current_version + 1,
-                            summary_type=result_key, # result_key matches summary_type in function
-                            content=content,
-                            report_type='tracxn'
-                        )
-                    except Exception as e:
-                        logger.warning(f"S3 summary save failed for {section_type}: {e}")
+        # Save Executive Summary (Dual-Write: DB + S3)
+        if analysis_result.get('executive_summary'):
+            ReportAnalysisSection.objects.create(
+                report=report,
+                section_type='executive_summary',
+                content_markdown=analysis_result['executive_summary'],
+                order=section_order
+            )
+            section_order += 1
+            
+            if getattr(settings, 'USE_S3', False):
+                try:
+                    org_id = str(project.organization_id) if project.organization_id else 'default'
+                    report_storage.save_analysis_summary(
+                        project_id=str(project.id),
+                        org_id=org_id,
+                        version=report.current_version + 1,
+                        summary_type='executive_summary',
+                        content=analysis_result['executive_summary'],
+                        report_type='tracxn'
+                    )
+                except Exception as e:
+                    logger.warning(f"S3 executive summary save failed: {e}")
         
         # Save to S3 if enabled
         if getattr(settings, 'USE_S3', False):
@@ -1533,7 +1390,7 @@ def generate_tracxn_report(self, report_id, user_id):
                 'company_count': analysis_result['company_count'],
                 'sections_count': section_order
             },
-            changes_summary=f"14-step Tracxn analysis: {analysis_result['company_count']} startups",
+            changes_summary=f"3-step Institutional Tracxn analysis: {analysis_result['company_count']} startups",
             generated_by=user
         )
         
