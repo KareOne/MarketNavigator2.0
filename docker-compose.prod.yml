@@ -70,6 +70,7 @@ services:
       - WORKER_TOKENS_CRUNCHBASE=${WORKER_TOKEN_CRUNCHBASE:-prod-cb-token-change-me}
       - WORKER_TOKENS_TRACXN=${WORKER_TOKEN_TRACXN:-prod-tx-token-change-me}
       - WORKER_TOKENS_SOCIAL=${WORKER_TOKEN_SOCIAL:-prod-social-token-change-me}
+      - WORKER_TOKENS_LINKEDIN=${WORKER_TOKEN_LINKEDIN:-prod-linkedin-token-change-me}
       - LOG_LEVEL=INFO
     depends_on:
       redis:
