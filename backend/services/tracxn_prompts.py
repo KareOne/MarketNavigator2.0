@@ -27,27 +27,36 @@ class TracxnPromptTemplates:
     # 1. THE 2-PAGE FLASH ANALYSIS (Outliers, Red Flags & Signal Detection)
     # =========================================================================
     @staticmethod
-    def generate_flash_analysis_report(all_companies_summary: List[Dict], target_market_context: str = "") -> str:
+    def generate_flash_analysis_report(company_reports: List[Dict], executive_summary: str, target_market_context: str = "") -> str:
         """
         Generates a high-velocity 'Red Flag / Green Light' report.
         Focus: Outlier detection, data integrity checks, and immediate market signals.
+        This is generated AFTER company deep dives and executive summary to synthesize findings.
         """
-        data_str = json.dumps(all_companies_summary, indent=2, ensure_ascii=False, default=str)
+        # Format company reports for prompt
+        reports_text = "\n\n".join([
+            f"### {r['company_name']}\n{r['content'][:2000]}..." if len(r['content']) > 2000 else f"### {r['company_name']}\n{r['content']}"
+            for r in company_reports
+        ])
         
         return f"""You are a Lead Investment Screener at a top Venture Capital firm. 
-Your task is to produce a **2-Page Flash Analysis Report** on a new batch of companies.
+Your task is to produce a **2-Page Flash Analysis Report** synthesizing the detailed analysis below.
 {target_market_context}
 
 **OBJECTIVE:** 
 Identify the highest-potential targets and the highest-risk assets immediately. Cut through the noise. Do not summarize every company. Focus ONLY on outliers and critical signals.
 
-**INPUT DATA (JSON Summary):**
-{data_str}
+**EXECUTIVE SUMMARY (Already Analyzed):**
+{executive_summary[:3000]}
+
+**INDIVIDUAL COMPANY REPORTS:**
+{reports_text}
 
 **STRICT ANALYSIS GUIDELINES:**
 1.  **No Fluff:** Use bullet points, bold metrics, and concise executive language.
 2.  **Data Integrity Check:** Immediately flag anomalies (e.g., Public companies with <50 employees, Unicorns with no funding data).
 3.  **Relative Performance:** Compare companies against the cohort average.
+4.  **Synthesize:** Pull the most critical insights from the detailed reports above.
 
 **REPORT STRUCTURE (Markdown):**
 

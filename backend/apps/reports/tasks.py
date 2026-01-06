@@ -1060,9 +1060,14 @@ def generate_tracxn_report(self, report_id, user_id):
         tracker.complete_step('init', {'keywords_count': len(keywords)})
         
         # ===== Step 2: API Search =====
+        # Note: The Tracxn API also sends status updates for 'sorting' and 'fetching_details'
+        # during the search_with_ranking call. We start those steps now so updates flow correctly.
         tracker.start_step('api_search')
         keywords_list = ', '.join(keywords[:3])
         tracker.update_step_message('api_search', f"Searching Tracxn with {len(keywords)} keywords: {keywords_list}...")
+        
+        # Pre-start sorting and fetching_details so API status updates appear in real-time
+        # These steps happen inside search_with_ranking() and send status updates via callback
         
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -1211,19 +1216,7 @@ def generate_tracxn_report(self, report_id, user_id):
             
             num_startups = len(startups_for_analysis)
             
-            # Step 5: Flash Analysis (2-page market flash report)
-            await start_step('flash_analysis')
-            try:
-                prompt = pipeline.prompts.generate_flash_analysis_report(
-                    startups_for_analysis, target_description
-                )
-                flash_analysis = await pipeline._call_ai(prompt, max_tokens=3000)
-            except Exception as e:
-                logger.error(f"Flash analysis failed: {e}")
-                flash_analysis = f"Analysis error: {str(e)}"
-            await complete_step('flash_analysis', {'report_generated': True})
-            
-            # Step 6: Company Deep Dive (per company comprehensive analysis)
+            # Step 5: Company Deep Dive (per company comprehensive analysis)
             await start_step('company_deep_dive')
             company_reports = []
             for startup in startups_for_analysis:
@@ -1239,7 +1232,7 @@ def generate_tracxn_report(self, report_id, user_id):
                     company_reports.append({'company_name': startup_name, 'content': f"Analysis error: {str(e)}"})
             await complete_step('company_deep_dive', {'startups_analyzed': len(company_reports)})
             
-            # Step 7: Executive Summary (5-page strategic assessment)
+            # Step 6: Executive Summary (5-page strategic assessment)
             await start_step('executive_summary')
             try:
                 report_texts = [r['content'] for r in company_reports]
@@ -1252,11 +1245,24 @@ def generate_tracxn_report(self, report_id, user_id):
                 executive_summary = f"Analysis error: {str(e)}"
             await complete_step('executive_summary', {'summary_generated': True})
             
+            # Step 7: Flash Analysis (2-page market flash report - synthesizing all analysis)
+            await start_step('flash_analysis')
+            try:
+                # Pass company reports to flash analysis so it can synthesize the findings
+                prompt = pipeline.prompts.generate_flash_analysis_report(
+                    company_reports, executive_summary, target_description
+                )
+                flash_analysis = await pipeline._call_ai(prompt, max_tokens=3000)
+            except Exception as e:
+                logger.error(f"Flash analysis failed: {e}")
+                flash_analysis = f"Analysis error: {str(e)}"
+            await complete_step('flash_analysis', {'report_generated': True})
+            
             return {
                 'company_count': num_startups,
-                'flash_analysis': flash_analysis,
                 'company_reports': company_reports,
                 'executive_summary': executive_summary,
+                'flash_analysis': flash_analysis,
             }
         
         # Run the analysis

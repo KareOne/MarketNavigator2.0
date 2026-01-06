@@ -124,19 +124,9 @@ class TracxnAnalysisPipeline:
         }
         
         try:
-            # ===== Step 1: Flash Analysis (2-page) =====
-            logger.info("Step 1/3: Generating Flash Analysis Report...")
-            await self._update_progress("flash_analysis", "Generating 2-page market flash report", 10)
-            
-            prompt = self.prompts.generate_flash_analysis_report(
-                companies_to_analyze, 
-                self.target_market_description
-            )
-            result['flash_analysis'] = await self._call_ai(prompt, max_tokens=3000)
-            
-            # ===== Step 2: Company Deep Dive (per company) =====
-            logger.info("Step 2/3: Generating Company Deep Dive Reports...")
-            await self._update_progress("company_deep_dive", "Generating comprehensive due diligence", 25)
+            # ===== Step 1: Company Deep Dive (per company) =====
+            logger.info("Step 1/3: Generating Company Deep Dive Reports...")
+            await self._update_progress("company_deep_dive", "Generating comprehensive due diligence", 10)
             
             for i, company in enumerate(companies_to_analyze):
                 company_name = company.get('name', company.get('Company Name', f'Company {i+1}'))
@@ -156,15 +146,26 @@ class TracxnAnalysisPipeline:
                         'content': f"Analysis error: {str(e)}"
                     })
             
-            # ===== Step 3: Executive Summary (5-page) =====
-            logger.info("Step 3/3: Generating Executive Summary...")
-            await self._update_progress("executive_summary", "Generating 5-page strategic assessment", 85)
+            # ===== Step 2: Executive Summary (5-page) =====
+            logger.info("Step 2/3: Generating Executive Summary...")
+            await self._update_progress("executive_summary", "Generating 5-page strategic assessment", 70)
             
             report_texts = [r['content'] for r in result['company_reports']]
             prompt = self.prompts.generate_executive_summary(
                 report_texts, num_companies, self.target_market_description
             )
             result['executive_summary'] = await self._call_ai(prompt, max_tokens=5000)
+            
+            # ===== Step 3: Flash Analysis (2-page synthesis) =====
+            logger.info("Step 3/3: Generating Flash Analysis Report...")
+            await self._update_progress("flash_analysis", "Generating 2-page synthesis report", 90)
+            
+            prompt = self.prompts.generate_flash_analysis_report(
+                result['company_reports'],
+                result['executive_summary'],
+                self.target_market_description
+            )
+            result['flash_analysis'] = await self._call_ai(prompt, max_tokens=3000)
             
             # Calculate processing time
             result['processing_time'] = time.time() - start_time

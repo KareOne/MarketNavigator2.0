@@ -51,9 +51,9 @@ class ReportProgressTracker:
             {'key': 'api_search', 'name': 'Searching Tracxn', 'description': 'Finding similar startups', 'weight': 10},
             {'key': 'sorting', 'name': 'Ranking Results', 'description': 'Sorting by relevance and scoring', 'weight': 2},
             {'key': 'fetching_details', 'name': 'Gathering Company Data', 'description': 'Collecting detailed startup data', 'weight': 5},
-            {'key': 'flash_analysis', 'name': 'Flash Analysis', 'description': '2-page market flash report with outliers and signals', 'weight': 15},
             {'key': 'company_deep_dive', 'name': 'Company Deep Dive', 'description': 'Comprehensive due diligence per company', 'weight': 45},
             {'key': 'executive_summary', 'name': 'Executive Summary', 'description': '5-page strategic landscape assessment', 'weight': 15},
+            {'key': 'flash_analysis', 'name': 'Flash Analysis', 'description': '2-page synthesis report with outliers and signals', 'weight': 15},
             {'key': 'html_gen', 'name': 'Generating Report', 'description': 'Creating HTML report', 'weight': 2},
             {'key': 'save', 'name': 'Saving', 'description': 'Saving report and analysis sections', 'weight': 3},
         ],
@@ -241,6 +241,9 @@ class ReportProgressTracker:
         Add a real-time detail item to a step's details array.
         This is used to show granular progress like individual keyword searches.
         
+        If the step doesn't exist yet, it will be auto-started to allow real-time
+        status updates from external API callbacks.
+        
         Args:
             step_key: The key identifier for the step
             detail_type: Type of detail (e.g., 'keywords', 'search_result', 'company_found')
@@ -252,31 +255,48 @@ class ReportProgressTracker:
         
         try:
             step = ReportProgressStep.objects.get(report=self.report, step_key=step_key)
-            
-            # Build detail item
-            detail_item = {
-                'type': detail_type,
-                'message': message,
-                'timestamp': time.time(),
-            }
-            if data:
-                detail_item['data'] = data
-            
-            # Append to details array (limit to last 50 items to prevent bloat)
-            details = step.details or []
-            details.append(detail_item)
-            if len(details) > 50:
-                details = details[-50:]
-            
-            step.details = details
-            step.save(update_fields=['details', 'updated_at'])
-            
-            logger.info(f"📝 Added detail to step {step_key}: {detail_type} - {message[:50]}...")
-            
-            self._maybe_cleanup_connection()  # Periodic cleanup for frequent detail adds
-            self._broadcast_update()
         except ReportProgressStep.DoesNotExist:
-            logger.warning(f"⚠️ Step {step_key} not found for adding detail")
+            # Auto-start the step if it doesn't exist (for real-time API callbacks)
+            step_info = self._get_step_info(step_key)
+            if step_info:
+                logger.info(f"📤 Auto-starting step {step_key} for incoming status update")
+                step = ReportProgressStep.objects.create(
+                    report=self.report,
+                    step_key=step_key,
+                    name=step_info['name'],
+                    description=step_info['description'],
+                    status='in_progress',
+                    started_at=timezone.now()
+                )
+                # Update report model
+                self.report.current_step = step_info['name']
+                self.report.save(update_fields=['current_step', 'updated_at'])
+            else:
+                logger.warning(f"⚠️ Step {step_key} not found in REPORT_STEPS, cannot auto-start")
+                return
+        
+        # Build detail item
+        detail_item = {
+            'type': detail_type,
+            'message': message,
+            'timestamp': time.time(),
+        }
+        if data:
+            detail_item['data'] = data
+        
+        # Append to details array (limit to last 50 items to prevent bloat)
+        details = step.details or []
+        details.append(detail_item)
+        if len(details) > 50:
+            details = details[-50:]
+        
+        step.details = details
+        step.save(update_fields=['details', 'updated_at'])
+        
+        logger.info(f"📝 Added detail to step {step_key}: {detail_type} - {message[:50]}...")
+        
+        self._maybe_cleanup_connection()  # Periodic cleanup for frequent detail adds
+        self._broadcast_update()
     
     def clear_step_details(self, step_key: str):
         """Clear all details for a step (useful when restarting)."""

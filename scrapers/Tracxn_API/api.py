@@ -2075,17 +2075,6 @@ async def scrape_batch_companies_api_with_rank(request: BatchCompaniesAPIWithRan
                             await browser.close()
                             return {"error": "Request was cancelled", "cancelled": True}
                         
-                        # Send status for current keyword search
-                        await send_status_update(
-                            "api_search",
-                            "search_result",
-                            f"Searched '{keyword}' ({idx}/{len(request.company_names)})",
-                            {
-                                "keyword": keyword,
-                                "keyword_index": idx,
-                                "total_keywords": len(request.company_names)
-                            }
-                        )
                         
                         logger.info(f"Searching via API: '{keyword}'")
                         
@@ -2176,13 +2165,6 @@ async def scrape_batch_companies_api_with_rank(request: BatchCompaniesAPIWithRan
                     }
                 }
             
-            # Send status: Sorting companies
-            await send_status_update(
-                "sorting",
-                "sorting_started",
-                f"Ranking {len(company_tracker)} startups by similarity and Tracxn score",
-                {"total_companies": len(company_tracker)}
-            )
             
             # Step 2: Calculate similarity scores
             logger.info(f"\\n=== Step 2: Calculating similarity scores for {len(company_tracker)} companies ===")
