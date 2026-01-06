@@ -849,9 +849,6 @@ def generate_social_report(self, report_id, user_id):
         from asgiref.sync import sync_to_async
         
         class AsyncTracker:
-            def __init__(self, tracker):
-                self.tracker = tracker
-            async def update_step_message(self, *args, **kwargs):
                 await sync_to_async(self.tracker.update_step_message)(*args, **kwargs)
             async def add_step_detail(self, *args, **kwargs):
                 await sync_to_async(self.tracker.add_step_detail)(*args, **kwargs)
@@ -1585,47 +1582,6 @@ def generate_tracxn_report(self, report_id, user_id):
                 ).first()
                 if running_step:
                     tracker.fail_step(running_step.step_key, str(e))
-        raise
-
-
-@shared_task(bind=True, queue='reports')
-def generate_social_report(self, report_id, user_id):
-    """
-    Generate Social analysis report.
-    
-    NOTE: This feature is currently DISABLED.
-    Twitter and LinkedIn scrapers have been removed from the project.
-    """
-    from .models import Report
-    from apps.users.models import User
-    
-    try:
-        report = Report.objects.get(id=report_id)
-        user = User.objects.get(id=user_id)
-        project = report.project
-        
-        # Feature is disabled
-        report.status = 'failed'
-        report.progress = 0
-        report.current_step = 'Feature temporarily disabled'
-        report.error_message = (
-            'Social Analysis (Twitter/LinkedIn) is currently disabled. '
-            'This feature will be available in a future update.'
-        )
-        report.save()
-        
-        send_progress_update(
-            str(report.project_id), 
-            'social', 
-            0, 
-            'Feature disabled'
-        )
-        
-        logger.info(f"Social report disabled for project {project.id}")
-        return {"status": "disabled", "message": "Social Analysis feature is currently disabled"}
-        
-    except Exception as e:
-        logger.error(f"❌ Error in disabled social report: {e}")
         raise
 
 
