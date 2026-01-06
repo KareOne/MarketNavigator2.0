@@ -96,7 +96,6 @@ class TwitterAnalysisPipeline:
             results[category] = content
             
             if tracker:
-                 await tracker.add_step_detail(category, 'insight', f"Completed {category}", {'type': category})
                  await tracker.complete_step(category)
 
         # 2. Generate Cross-Cutting Insights

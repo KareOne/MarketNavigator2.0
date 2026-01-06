@@ -872,7 +872,7 @@ def generate_social_report(self, report_id, user_id):
         
         try:
             analysis_results = loop.run_until_complete(
-                analysis_pipeline.analyze(results_list, tracker=async_tracker)
+                analysis_pipeline.analyze(all_tweets, tracker=async_tracker)
             )
         except Exception as e:
             logger.error(f"Analysis failed: {e}")
