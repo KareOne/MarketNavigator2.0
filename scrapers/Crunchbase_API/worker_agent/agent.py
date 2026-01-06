@@ -259,13 +259,11 @@ class WorkerAgent:
                         consecutive_failures += 1
                         self._connection_healthy = False
                         logger.warning(f"⚠️ Heartbeat failed ({consecutive_failures}x) - connection lost")
-                        # If task in progress, don't break loop - let task continue
-                        # The task completion will trigger reconnection
-                        if not self._in_progress_task:
-                            logger.info("No active task, will reconnect...")
-                            break
-                        else:
-                            logger.info("Task in progress, will send result after reconnection")
+                        # Force reconnection even if task is in progress
+                        logger.info("Connection lost, triggering reconnection...")
+                        if self.websocket:
+                            await self.websocket.close()
+                        break
                     except Exception as e:
                         consecutive_failures += 1
                         logger.warning(f"⚠️ Heartbeat send error: {e}")
@@ -288,7 +286,8 @@ class WorkerAgent:
                 msg_type = data.get("type")
                 
                 if msg_type == "task":
-                    await self._handle_task(data)
+                    # Run task in background so we don't block heartbeats/pings
+                    asyncio.create_task(self._handle_task(data))
                 elif msg_type == "ping":
                     # Server ping to keep connection alive - respond with pong
                     try:

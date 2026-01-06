@@ -544,8 +544,7 @@ def generate_crunchbase_report(self, report_id, user_id):
             report=report,
             section_type='fast_analysis',
             content_markdown=analysis_result['fast_analysis'],
-            order=section_order,
-            title="Fast Analysis"
+            order=section_order
         )
         section_order += 1
         
@@ -554,8 +553,7 @@ def generate_crunchbase_report(self, report_id, user_id):
             report=report,
             section_type='strategic_summary',
             content_markdown=analysis_result['strategic_summary'],
-            order=section_order,
-            title="Strategic Summary"
+            order=section_order
         )
         section_order += 1
         
@@ -566,8 +564,7 @@ def generate_crunchbase_report(self, report_id, user_id):
                 section_type='company_deep_dive',
                 company_name=report_item['company_name'],
                 content_markdown=report_item['content'],
-                order=section_order,
-                title=f"Analysis: {report_item['company_name']}"
+                order=section_order
             )
             section_order += 1
         

@@ -10,7 +10,7 @@ import random
 from typing import Callable, Any
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError, expect
-from config import DEBUG, USERNAME, PASSWORD, STATE_PATH, SLEEP_DELAY, get_playwright_proxy_config
+from config import DEBUG, HEADLESS, USERNAME, PASSWORD, STATE_PATH, SLEEP_DELAY, get_playwright_proxy_config
 
 
 class CrunchbaseBrowserManager:
@@ -43,7 +43,7 @@ class CrunchbaseBrowserManager:
     async def _create_browser(self):
         """Create a new browser and context."""
         proxy_config = get_playwright_proxy_config()
-        launch_options = {"headless": DEBUG, "slow_mo": 100}
+        launch_options = {"headless": HEADLESS, "slow_mo": 100}
         if proxy_config:
             launch_options["proxy"] = proxy_config
         
@@ -100,7 +100,7 @@ class CrunchbaseBrowserManager:
         
         # Create fresh browser without saved state
         proxy_config = get_playwright_proxy_config()
-        launch_options = {"headless": DEBUG, "slow_mo": 200}
+        launch_options = {"headless": HEADLESS, "slow_mo": 200}
         if proxy_config:
             launch_options["proxy"] = proxy_config
         

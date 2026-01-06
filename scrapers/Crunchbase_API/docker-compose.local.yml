@@ -1,0 +1,70 @@
+# Crunchbase API Local Worker Deployment
+# Connects to the local orchestrator running on the host machine via host.docker.internal
+# Run with: docker compose -f docker-compose.local.yml up --build
+
+services:
+  # ==========================================================================
+  # Crunchbase API Scraper (Local)
+  # ==========================================================================
+  crunchbase_api:
+    build: .
+    container_name: local-crunchbase-api
+    command: sh -c "python api_handler.py"
+    ports:
+      - "8003:8003"
+    volumes:
+      - .:/app
+    environment:
+      # Creds from .env file
+      CRUNCHBASE_USERNAME: ${CRUNCHBASE_USERNAME}
+      CRUNCHBASE_PASSWORD: ${CRUNCHBASE_PASSWORD}
+      PROXY_SERVER: ${PROXY_SERVER}
+      PROXY_USERNAME: ${PROXY_USERNAME}
+      PROXY_PASSWORD: ${PROXY_PASSWORD}
+      DB_CONFIG_HOST: ${DB_CONFIG_HOST}
+      DB_CONFIG_PORT: ${DB_CONFIG_PORT}
+      DB_CONFIG_USER: ${DB_CONFIG_USER}
+      DB_CONFIG_PASSWORD: ${DB_CONFIG_PASSWORD}
+      DB_CONFIG_CRUNCHBASE_DATABASE: ${DB_CONFIG_CRUNCHBASE_DATABASE}
+
+      PYTHONWARNINGS: "ignore::FutureWarning"
+      PANDAS_FUTURE_NO_SILENT_DOWNCASTING: "True"
+      # Status callbacks go to worker_agent which relays via WebSocket to orchestrator
+      STATUS_CALLBACK_URL: http://worker_agent:9099
+    # Ensure host.docker.internal works on Linux too if needed
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8003/health" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # ==========================================================================
+  # Worker Agent (Local - connects to host orchestrator)
+  # ==========================================================================
+  worker_agent:
+    build:
+      context: ./worker_agent
+      dockerfile: Dockerfile
+    container_name: local-crunchbase-worker
+    command: python agent.py
+    ports:
+      - "9099:9099" # Status proxy port (internal use only)
+    environment:
+      # Connect to host machine orchestrator
+      - ORCHESTRATOR_URL=ws://host.docker.internal:8010/ws/worker
+      - WORKER_TOKEN=dev-crunchbase-token
+      - API_TYPE=crunchbase
+      - WORKER_NAME=crunchbase-local-1
+      - LOCAL_API_URL=http://crunchbase_api:8003
+      - HEARTBEAT_INTERVAL=10
+      - RECONNECT_DELAY=5
+      - LOG_LEVEL=INFO
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - crunchbase_api
+    restart: unless-stopped

@@ -98,8 +98,8 @@ DATABASES = {
         'HOST': os.getenv('DB_HOST', 'localhost'),
         'PORT': os.getenv('DB_PORT', '5432'),
         'POOL_OPTIONS': {
-            'POOL_SIZE': 5,  # Reduced to prevent connection exhaustion
-            'MAX_OVERFLOW': 10,  # Max 15 connections per container
+            'POOL_SIZE': 20,  # Increased to handle concurrent celery workers + API
+            'MAX_OVERFLOW': 20,  # Allow bursts up to 40 connections total
             'RECYCLE': 120,  # Recycle connections after 2 minutes (shorter for cloud DB)
             'PRE_PING': True,  # Verify connection before use
             'POOL_TIMEOUT': 30,  # Wait max 30s for connection from pool
