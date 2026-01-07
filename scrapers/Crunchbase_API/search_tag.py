@@ -9,7 +9,7 @@ from database import save_company, already_scraped_urls, get_company
 from datetime import datetime, timedelta
 
 
-async def _perform_search(page, search_hashtag, use_ai_search=True):
+async def _perform_search(page, search_hashtag, use_ai_search=False):
     """
     Performs a search on Crunchbase.
     
@@ -132,7 +132,7 @@ async def _perform_search(page, search_hashtag, use_ai_search=True):
         return False
 
 
-async def _collect_companies_with_descriptions_impl(search_hashtag, num_companies=5, use_ai_search=True):
+async def _collect_companies_with_descriptions_impl(search_hashtag, num_companies=5, use_ai_search=False):
     """
     Internal implementation of collect_companies_with_descriptions.
     This function is queued to prevent concurrent browser operations.
@@ -302,7 +302,7 @@ async def _collect_companies_with_descriptions_impl(search_hashtag, num_companie
     return companies_data
 
 
-async def collect_companies_with_descriptions(search_hashtag, num_companies=5, use_ai_search=True):
+async def collect_companies_with_descriptions(search_hashtag, num_companies=5, use_ai_search=False):
     """
     Collects company URLs and full descriptions from the search table.
     Uses persistent browser manager with queuing for concurrent request safety.
@@ -329,7 +329,7 @@ async def collect_companies_with_descriptions(search_hashtag, num_companies=5, u
     )
 
 
-async def _collect_companies_with_rank_impl(search_hashtag, num_companies=5, use_ai_search=True):
+async def _collect_companies_with_rank_impl(search_hashtag, num_companies=5, use_ai_search=False):
     """
     Internal implementation of collect_companies_with_rank.
     This function is queued to prevent concurrent browser operations.
@@ -527,7 +527,7 @@ async def _collect_companies_with_rank_impl(search_hashtag, num_companies=5, use
     return companies_data
 
 
-async def collect_companies_with_rank(search_hashtag, num_companies=5, use_ai_search=True):
+async def collect_companies_with_rank(search_hashtag, num_companies=5, use_ai_search=False):
     """
     Collects company URLs, full descriptions, and CB rank from the search table.
     Uses persistent browser manager with queuing for concurrent request safety.
@@ -554,7 +554,7 @@ async def collect_companies_with_rank(search_hashtag, num_companies=5, use_ai_se
     )
 
 
-async def _run_scraper_impl(search_hashtag, num_companies=5, days_threshold=0, use_ai_search=True):
+async def _run_scraper_impl(search_hashtag, num_companies=5, days_threshold=0, use_ai_search=False):
     """
     Internal implementation of run_scraper.
     This function is queued to prevent concurrent browser operations.
@@ -714,7 +714,7 @@ async def _run_scraper_impl(search_hashtag, num_companies=5, days_threshold=0, u
     return results
 
 
-async def run_scraper(search_hashtag, num_companies=5, days_threshold=0, use_ai_search=True):
+async def run_scraper(search_hashtag, num_companies=5, days_threshold=0, use_ai_search=False):
     """
     Main scraper with MySQL storage and resume support.
     Uses persistent browser manager with queuing for concurrent request safety.
