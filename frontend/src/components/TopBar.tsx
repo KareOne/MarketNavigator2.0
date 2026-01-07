@@ -4,6 +4,9 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 
+// Admin emails that can see the admin dashboard link
+const ADMIN_EMAILS = ["thehamidrezamafi@gmail.com"];
+
 interface TopBarProps {
     showBackToDashboard?: boolean;
 }
@@ -12,6 +15,9 @@ export default function TopBar({ showBackToDashboard = false }: TopBarProps) {
     const { user, logout } = useAuth();
     const [theme, setTheme] = useState<"dark" | "light">("dark");
     const [showProfileMenu, setShowProfileMenu] = useState(false);
+
+    // Check if current user is admin
+    const isAdmin = user?.email && ADMIN_EMAILS.includes(user.email);
 
     useEffect(() => {
         // Check for saved theme preference
@@ -94,6 +100,17 @@ export default function TopBar({ showBackToDashboard = false }: TopBarProps) {
                                 <span className="profile-email">{user?.email || ""}</span>
                             </div>
                             <div className="profile-dropdown-divider" />
+                            {isAdmin && (
+                                <Link href="/admin" className="profile-dropdown-item" style={{ textDecoration: "none", color: "inherit" }}>
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <rect x="3" y="3" width="7" height="7" />
+                                        <rect x="14" y="3" width="7" height="7" />
+                                        <rect x="14" y="14" width="7" height="7" />
+                                        <rect x="3" y="14" width="7" height="7" />
+                                    </svg>
+                                    Admin Dashboard
+                                </Link>
+                            )}
                             <button className="profile-dropdown-item" onClick={logout}>
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                     <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />

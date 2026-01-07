@@ -32,6 +32,7 @@ urlpatterns = [
     path('api/chat/', include('apps.chat.urls')),
     path('api/share/', include('apps.sharing.urls')),
     path('api/files/', include('apps.files.urls')),
+    path('api/admin/', include('apps.admin.urls')),  # Admin/monitoring endpoints
 ]
 
 # Serve media files in development

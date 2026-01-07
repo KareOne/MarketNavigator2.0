@@ -1,0 +1,42 @@
+# Remote Worker Docker Compose
+# Deploy this on remote servers to connect API scrapers to the main orchestrator
+
+services:
+  # ==========================================================================
+  # Crunchbase API Scraper
+  # ==========================================================================
+  crunchbase_api:
+    build: ../../scrapers/Crunchbase_API
+    container_name: remote-crunchbase-api
+    command: sh -c "python api_handler.py"
+    volumes:
+      - ../../scrapers/Crunchbase_API:/app
+    environment:
+      PYTHONWARNINGS: "ignore::FutureWarning"
+      PANDAS_FUTURE_NO_SILENT_DOWNCASTING: "True"
+    restart: unless-stopped
+    # Note: No ports exposed - only accessible via worker_agent
+
+    # ==========================================================================
+    # Worker Agent (connects to main server)
+    # ==========================================================================
+  worker_agent:
+    build: ../../worker_agent
+    container_name: remote-worker-agent
+    command: python -m agent
+    environment:
+      - ORCHESTRATOR_URL=${ORCHESTRATOR_URL}
+      - WORKER_TOKEN=${WORKER_TOKEN}
+      - API_TYPE=${API_TYPE:-crunchbase}
+      - WORKER_NAME=${WORKER_NAME:-remote-worker}
+      - LOCAL_API_URL=${LOCAL_API_URL:-http://crunchbase_api:8003}
+      - HEARTBEAT_INTERVAL=${HEARTBEAT_INTERVAL:-10}
+      - RECONNECT_DELAY=${RECONNECT_DELAY:-5}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      - crunchbase_api
+    restart: unless-stopped
+
+networks:
+  default:
+    name: remote-worker-network

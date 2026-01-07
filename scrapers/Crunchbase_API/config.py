@@ -6,6 +6,8 @@ USERNAME = os.getenv("CRUNCHBASE_USERNAME")
 PASSWORD = os.getenv("CRUNCHBASE_PASSWORD")
 STATE_PATH = os.getenv("CRUNCHBASE_BROWSER_STATE_PATH")
 DEBUG = True
+# Determine headless mode from env var, default to True (headless)
+HEADLESS = os.getenv("HEADLESS", "true").lower() == "true"
 TEST_JSON_OUTPUT = "crunchbase/TEST_OUTPUT/test_output.json"
 DB_CONFIG_HOST = os.getenv("DB_CONFIG_HOST", "localhost")
 DB_CONFIG_PORT = int(os.getenv("DB_CONFIG_PORT", 3306))

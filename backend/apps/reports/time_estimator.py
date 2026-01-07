@@ -68,11 +68,21 @@ class TimeEstimator:
             'save': 3,
         },
         'tracxn': {
-            'init': 3,
-            'api_search': 180,
-            'data_parse': 10,
-            'html_gen': 5,
-            'save': 3,
+            'init': 5,
+            'api_search': 180,          # Tracxn API search
+            'sorting': 10,
+            'fetching_details': 30,     # Full data collection
+            'flash_analysis': 30,       # 2-page flash report
+            'company_deep_dive': 300,   # ~20s per company × 15 companies
+            'executive_summary': 45,    # 5-page executive synthesis
+            'html_gen': 10,
+            'save': 5,
+        },
+        'social': {
+            'init': 5,
+            'api_search': 120,
+            'analysis': 180,
+            'save': 5,
         },
         'pitch_deck': {
             'init': 5,
@@ -80,6 +90,11 @@ class TimeEstimator:
             'ai_generation': 120,
             'html_gen': 10,
             'save': 5,
+        },
+        'quick_report': {
+            'init': 3,              # Building prompt is fast
+            'api_search': 45,       # AI generation takes ~30-60 seconds
+            'save': 5,              # Saving sections
         },
     }
     

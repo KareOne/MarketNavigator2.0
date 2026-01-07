@@ -11,6 +11,24 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 
+class DatabaseCleanupMiddleware:
+    """
+    Middleware to ensure database connections are closed after request.
+    Critical for preventing connection pool exhaustion in async/threaded environments.
+    """
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        response = self.get_response(request)
+        
+        # Force close old connections to prevent zombies
+        from django.db import close_old_connections
+        close_old_connections()
+        
+        return response
+
+
 class AuditMiddleware:
     """
     Middleware for audit logging and API usage tracking.
@@ -55,17 +73,29 @@ class AuditMiddleware:
         return response
     
     def _track_usage(self, request, response, response_time_ms, request_size, response_size):
-        """Track API usage for rate limiting and analytics."""
+        """Track API usage for rate limiting and analytics.
+        Uses Celery for async processing to avoid blocking requests and exhausting DB connections.
+        """
         try:
-            # Import here to avoid circular imports
-            from apps.audit.models import APIUsage
+            # Skip tracking for high-frequency endpoints to reduce DB load
+            skip_endpoints = ['/api/health/', '/api/admin/orchestrator/health/']
+            if request.path in skip_endpoints:
+                return
+            
+            # Sample high-frequency endpoints (track 1 in 10 requests)
+            sample_endpoints = ['/api/admin/orchestrator/workers/', '/api/admin/orchestrator/queue/']
+            if request.path in sample_endpoints:
+                import random
+                if random.random() > 0.1:  # Skip 90% of requests
+                    return
             
             user_id = request.user.id if request.user.is_authenticated else None
             org_id = getattr(request.user, 'organization_id', None) if request.user.is_authenticated else None
             
-            # Create usage record (consider using Celery for async)
-            APIUsage.objects.create(
-                organization_id=org_id,
+            # Use Celery task for async processing (non-blocking)
+            from apps.audit.tasks import track_api_usage
+            track_api_usage.delay(
+                org_id=org_id,
                 user_id=user_id,
                 endpoint=request.path,
                 method=request.method,
@@ -75,7 +105,8 @@ class AuditMiddleware:
                 response_size=response_size,
             )
         except Exception as e:
-            logger.error(f"Failed to track API usage: {e}")
+            # Log but don't fail the request
+            logger.warning(f"Failed to queue API usage tracking: {e}")
     
     def _get_client_ip(self, request):
         """Get client IP address from request."""

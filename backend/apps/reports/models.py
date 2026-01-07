@@ -10,6 +10,7 @@ class Report(models.Model):
     """Report model for 4 panel types."""
     
     REPORT_TYPE_CHOICES = [
+        ('quick_report', 'Quick Report'),
         ('crunchbase', 'Crunchbase Analysis'),
         ('tracxn', 'Tracxn Analysis'),
         ('social', 'Social Analysis'),
@@ -267,5 +268,35 @@ class StepTimingHistory(models.Model):
     
     def __str__(self):
         return f"{self.report_type}/{self.step_key}: {self.duration_seconds:.1f}s"
+
+
+class ReportRawData(models.Model):
+    """
+    Store raw API data (JSON) directly in the database.
+    Provides durability guarantee even if S3 files are lost.
+    """
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    report = models.ForeignKey(
+        Report,
+        on_delete=models.CASCADE,
+        related_name='raw_data_versions'
+    )
+    
+    version = models.PositiveIntegerField()
+    report_type = models.CharField(max_length=50)  # crunchbase, tracxn, social
+    
+    # The raw data payload
+    data = models.JSONField()
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        db_table = 'report_raw_data'
+        unique_together = ['report', 'version', 'report_type']
+        ordering = ['-version']
+        
+    def __str__(self):
+        return f"{self.report_type} Raw Data - v{self.version}"
 
 

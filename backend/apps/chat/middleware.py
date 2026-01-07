@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 def get_user_from_token(token_string):
     """Get user from JWT token."""
     from apps.users.models import User
+    from django.db import connection
     
     try:
         token = AccessToken(token_string)
@@ -24,6 +25,9 @@ def get_user_from_token(token_string):
             return User.objects.get(id=user_id)
     except (InvalidToken, TokenError, User.DoesNotExist) as e:
         logger.warning(f"WebSocket auth failed: {e}")
+    finally:
+        # Explicitly close connection to return it to pool
+        connection.close()
     
     return AnonymousUser()
 

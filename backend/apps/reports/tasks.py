@@ -18,7 +18,21 @@ from asgiref.sync import async_to_sync
 import asyncio
 import logging
 
+import logging
+import functools
+from django.db import close_old_connections
+
 logger = logging.getLogger(__name__)
+
+def close_db_wrapper(func):
+    """Decorator to ensure DB connections are closed after task execution."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        finally:
+            close_old_connections()
+    return wrapper
 
 
 def send_progress_update(project_id, report_type, progress, current_step):
@@ -66,37 +80,8 @@ def get_project_inputs_dict(inputs):
         'inspiration_sources': inputs.inspiration_sources or '',
     }
 
-
-def build_search_keywords(inputs) -> list:
-    """Build search keywords from project inputs."""
-    keywords = []
-    
-    # Add startup name variations
-    if inputs.startup_name:
-        keywords.append(inputs.startup_name)
-    
-    # Extract keywords from description
-    if inputs.startup_description:
-        # Take first 3-5 significant words
-        words = inputs.startup_description.split()[:20]
-        keywords.extend([w for w in words if len(w) > 4])
-    
-    # Add research goal keywords
-    if inputs.research_goal:
-        keywords.append(inputs.research_goal)
-    
-    # Add inspiration sources
-    if inputs.inspiration_sources:
-        sources = inputs.inspiration_sources.split(',')
-        keywords.extend([s.strip() for s in sources[:5]])
-    
-    # Deduplicate and limit
-    keywords = list(dict.fromkeys(keywords))[:10]
-    
-    return keywords if keywords else ['startup', 'technology']
-
-
 @shared_task(bind=True, queue='reports')
+@close_db_wrapper
 def generate_crunchbase_report(self, report_id, user_id):
     """
     Generate Crunchbase analysis report using 13-step MVP pipeline.
@@ -112,6 +97,7 @@ def generate_crunchbase_report(self, report_id, user_id):
     from apps.users.models import User
     from services.scrapers.crunchbase_scraper import crunchbase_scraper
     from services.crunchbase_analysis import CrunchbaseAnalysisPipeline, generate_analysis_html
+    from services.report_storage import report_storage
     from core.storage import storage_service
     
     report = None
@@ -137,45 +123,39 @@ def generate_crunchbase_report(self, report_id, user_id):
         
         # Check if we need to generate keywords using AI
         if not inputs.extracted_keywords or len(inputs.extracted_keywords) == 0:
-            # Generate keywords using Liara AI
-            try:
-                from services.keyword_generator import KeywordGenerator
-                
-                tracker.update_step_message('init', "Generating AI-powered search keywords...")
-                logger.info("🔑 Generating search keywords using Liara AI...")
-                generator = KeywordGenerator()
-                project_input_dict = get_project_inputs_dict(inputs)
-                search_params = generator.generate(project_input_dict)
-                
-                keywords = search_params['keywords']
-                target_description = search_params['target_description']
-                
-                # Save generated keywords to project for future use
-                inputs.extracted_keywords = keywords
-                inputs.target_description = target_description
-                inputs.save(update_fields=['extracted_keywords', 'target_description'])
-                
-                # Add each keyword as a separate step detail for visibility
-                for kw in keywords:
-                    tracker.add_step_detail(
-                        'init',
-                        'keyword',
-                        kw,
-                        {'keyword': kw}
-                    )
-                
-                # Update step message
-                keywords_preview = ', '.join(keywords[:5])
-                if len(keywords) > 5:
-                    keywords_preview += f' +{len(keywords) - 5} more'
-                tracker.update_step_message('init', f"Keywords ready: {keywords_preview}")
-                logger.info(f"✅ AI generated {len(keywords)} keywords: {keywords[:5]}...")
-                
-            except Exception as e:
-                logger.warning(f"AI keyword generation failed, using fallback: {e}")
-                keywords = build_search_keywords(inputs)
-                target_description = inputs.startup_description or inputs.startup_name or ''
-                tracker.add_step_detail('init', 'fallback', f"Using fallback keywords: {e}")
+            # Generate keywords using Liara AI - NO FALLBACK
+            from services.keyword_generator import KeywordGenerator
+            
+            tracker.update_step_message('init', "Generating AI-powered search keywords...")
+            logger.info("🔑 Generating search keywords using Liara AI (forced tool calling)...")
+            
+            generator = KeywordGenerator()
+            project_input_dict = get_project_inputs_dict(inputs)
+            search_params = generator.generate(project_input_dict)  # Will raise exception if fails
+            
+            keywords = search_params['keywords']
+            target_description = search_params['target_description']
+            
+            # Save generated keywords to project for future use
+            inputs.extracted_keywords = keywords
+            inputs.target_description = target_description
+            inputs.save(update_fields=['extracted_keywords', 'target_description'])
+            
+            # Add each keyword as a separate step detail for visibility
+            for kw in keywords:
+                tracker.add_step_detail(
+                    'init',
+                    'keyword',
+                    kw,
+                    {'keyword': kw}
+                )
+            
+            # Update step message
+            keywords_preview = ', '.join(keywords[:5])
+            if len(keywords) > 5:
+                keywords_preview += f' +{len(keywords) - 5} more'
+            tracker.update_step_message('init', f"Keywords ready: {keywords_preview}")
+            logger.info(f"✅ AI generated {len(keywords)} keywords: {keywords[:5]}...")
         else:
             # Use existing keywords
             keywords = inputs.extracted_keywords
@@ -205,6 +185,12 @@ def generate_crunchbase_report(self, report_id, user_id):
         
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        
+        # Initialize before try block to prevent undefined var errors on exception
+        all_companies = []
+        top_companies = []
+        metadata = {}
+        result = {}
         
         try:
             result = loop.run_until_complete(
@@ -247,6 +233,41 @@ def generate_crunchbase_report(self, report_id, user_id):
                 'similarity_time': similarity_time
             })
             
+            # Save raw Crunchbase data to JSON file
+            try:
+                org_id = str(project.organization_id) if project.organization_id else 'default'
+                report_storage.save_crunchbase_raw_data(
+                    project_id=str(project.id),
+                    org_id=org_id,
+                    version=report.current_version + 1,
+                    raw_data={
+                        'all_companies': all_companies,
+                        'top_companies': top_companies,
+                        'metadata': metadata,
+                        'keywords': keywords,
+                        'target_description': target_description,
+                    }
+                )
+                logger.info(f"✅ Saved raw Crunchbase data to S3")
+                
+                # Save to DB (Dual-Write)
+                from .models import ReportRawData
+                ReportRawData.objects.create(
+                    report=report,
+                    version=report.current_version + 1,
+                    report_type='crunchbase',
+                    data={
+                        'all_companies': all_companies,
+                        'top_companies': top_companies,
+                        'metadata': metadata,
+                        'keywords': keywords,
+                        'target_description': target_description,
+                    }
+                )
+                logger.info(f"✅ Saved raw Crunchbase data to DB")
+            except Exception as e:
+                logger.warning(f"Failed to save Crunchbase raw data JSON: {e}")
+            
         except Exception as e:
             logger.warning(f"Crunchbase scraper failed: {e}")
             tracker.fail_step('api_search', str(e))
@@ -256,6 +277,11 @@ def generate_crunchbase_report(self, report_id, user_id):
             loop.close()
         
         # ===== Step 3: Sorting =====
+        # NOTE: If orchestrator was used, the remote worker already sent sorting/ranking updates
+        # via real-time status callbacks. We still need to start/complete the step locally
+        # but skip the detailed progress to avoid duplicates shown after-the-fact.
+        used_orchestrator = metadata.get('used_orchestrator', False)
+        
         tracker.start_step('sorting')
         
         # Show top company names being analyzed
@@ -281,32 +307,49 @@ def generate_crunchbase_report(self, report_id, user_id):
         
         # Parse company data for analysis
         companies_for_analysis = [
-            crunchbase_scraper.parse_company_data(c.get('company_data', c)) 
+            c.get('company_data', c)
             for c in top_companies[:10]
         ]
         
         # Get final company names
         final_company_names = [c.get('name', 'Unknown') for c in companies_for_analysis if c.get('name')]
         
-        # Add sorted top companies as step details with CB rank and description
+        # Add detailed company ranks from sorted_top_companies metadata
+        # Check if real-time updates already added these (from remote worker via StatusUpdateView)
         sorted_top_companies = result.get('metadata', {}).get('sorted_top_companies', [])
         if sorted_top_companies:
-            for idx, comp in enumerate(sorted_top_companies, 1):
-                name = comp.get('name', 'Unknown')
-                cb_rank = comp.get('cb_rank', 'N/A')
-                description = comp.get('description', '')  # Full description, no truncation
-                
-                tracker.add_step_detail(
-                    'sorting',
-                    'company_rank',
-                    f"{idx}. {name} (CB Rank: {cb_rank})",  # No # prefix, use period after number
-                    {
-                        'rank': idx,
-                        'name': name,
-                        'cb_rank': cb_rank,
-                        'description': description
-                    }
-                )
+            # Check existing company_rank details to avoid duplicates
+            from .models import ReportProgressStep
+            existing_company_ranks = 0
+            try:
+                sorting_step = ReportProgressStep.objects.filter(report=report, step_key='sorting').first()
+                if sorting_step and sorting_step.details:
+                    existing_company_ranks = sum(1 for d in sorting_step.details if d.get('type') == 'company_rank')
+                logger.info(f"🔍 Deduplication check: {existing_company_ranks} existing company_rank entries, {len(sorted_top_companies)} from result")
+            except Exception as e:
+                logger.warning(f"⚠️ Error checking existing company_ranks: {e}")
+            
+            # Add all companies if none exist, or skip if already have enough
+            if existing_company_ranks < len(sorted_top_companies):
+                logger.info(f"📝 Adding {len(sorted_top_companies)} company_rank entries (existing: {existing_company_ranks})")
+                for idx, comp in enumerate(sorted_top_companies, 1):
+                    name = comp.get('name', 'Unknown')
+                    cb_rank = comp.get('cb_rank', 'N/A')
+                    description = comp.get('description', '')  # Full description, no truncation
+                    
+                    tracker.add_step_detail(
+                        'sorting',
+                        'company_rank',
+                        f"{idx}. {name} (CB Rank: {cb_rank})",  # No # prefix, use period after number
+                        {
+                            'rank': idx,
+                            'name': name,
+                            'cb_rank': cb_rank,
+                            'description': description
+                        }
+                    )
+            else:
+                logger.info(f"⏭️ Skipping company_rank entries - already have {existing_company_ranks}")
         
         tracker.complete_step('sorting', {
             'companies_sorted': len(companies_for_analysis),
@@ -317,13 +360,14 @@ def generate_crunchbase_report(self, report_id, user_id):
             raise Exception("No companies found for analysis")
         
         # ===== Step 4: Fetching Company Details =====
-        # Note: Real-time per-company updates now come from crunchbase_api via HTTP callbacks
+        # Note: If orchestrator was used, real-time per-company updates already came from remote worker
         tracker.start_step('fetching_details')
-        tracker.update_step_message(
-            'fetching_details',
-            f"Processing {len(companies_for_analysis)} companies...",
-            progress_percent=50
-        )
+        if not used_orchestrator:
+            tracker.update_step_message(
+                'fetching_details',
+                f"Processing {len(companies_for_analysis)} companies...",
+                progress_percent=50
+            )
         
         # The scraping already happened during API search - this step just confirms completion
         tracker.complete_step('fetching_details', {
@@ -331,7 +375,7 @@ def generate_crunchbase_report(self, report_id, user_id):
             'company_names': final_company_names
         })
         
-        # ===== Steps 3-10: Run Analysis Pipeline =====
+        # ===== Part 1-3: Run Analysis Pipeline =====
         async def run_analysis_with_tracking():
             """Run analysis pipeline with step-by-step progress updates."""
             from asgiref.sync import sync_to_async
@@ -339,6 +383,11 @@ def generate_crunchbase_report(self, report_id, user_id):
             # Wrap tracker methods for async use
             start_step = sync_to_async(tracker.start_step, thread_sensitive=True)
             complete_step = sync_to_async(tracker.complete_step, thread_sensitive=True)
+            update_step_message = sync_to_async(tracker.update_step_message, thread_sensitive=True)
+            
+            # Wrap storage methods
+            save_section = sync_to_async(report_storage.save_analysis_section, thread_sensitive=True)
+            save_summary = sync_to_async(report_storage.save_analysis_summary, thread_sensitive=True)
             
             # Create pipeline (uses LIARA_MODEL from settings by default)
             pipeline = CrunchbaseAnalysisPipeline(
@@ -348,71 +397,110 @@ def generate_crunchbase_report(self, report_id, user_id):
             
             num_companies = len(companies_for_analysis)
             
-            # Step 3: Company Overview
-            await start_step('company_overview')
-            overview = await pipeline._call_ai(
-                pipeline.prompts.generate_company_overview(companies_for_analysis)
-            )
-            await complete_step('company_overview')
+            # Part 1: Company Deep Dive
+            await start_step('company_deep_dive')
             
-            # Per-company reports
-            per_company = {}
-            report_types = [
-                ('tech_product', pipeline.prompts.generate_tech_product_report),
-                ('market_demand', pipeline.prompts.generate_market_demand_report),
-                ('competitor', pipeline.prompts.generate_competitor_report),
-                ('market_funding', pipeline.prompts.generate_market_funding_report),
-                ('growth_potential', pipeline.prompts.generate_growth_potential_report),
-                ('swot', pipeline.prompts.generate_swot_report),
-            ]
+            # --- Part 1: Company Deep Dive ---
+            deep_dive_reports = []
             
-            for step_key, prompt_fn in report_types:
-                await start_step(step_key)
-                per_company[step_key] = []
+            for idx, company in enumerate(companies_for_analysis):
+                company_name = company.get("Company Name", company.get("name", f"Company {idx + 1}"))
                 
-                for company in companies_for_analysis:
-                    company_name = company.get("Company Name", company.get("name", "Unknown"))
-                    try:
-                        content = await pipeline._call_ai(prompt_fn(company))
-                        per_company[step_key].append({
-                            'company_name': company_name,
-                            'content': content
-                        })
-                    except Exception as e:
-                        logger.error(f"Analysis failed for {company_name}: {e}")
-                        per_company[step_key].append({
-                            'company_name': company_name,
-                            'content': f"Analysis error: {str(e)}"
-                        })
+                # Update tracker message
+                await update_step_message(
+                    'company_deep_dive', 
+                    f"Analyzing {company_name} ({idx+1}/{num_companies})",
+                    progress_percent=int((idx / num_companies) * 100)
+                )
                 
-                await complete_step(step_key, {'companies_analyzed': len(per_company[step_key])})
-            
-            # Step 10: Executive Summaries
-            await start_step('summaries')
-            summaries = {}
-            summary_types = [
-                ('tech_product_summary', pipeline.prompts.generate_tech_product_summary, 'tech_product'),
-                ('market_demand_summary', pipeline.prompts.generate_market_demand_summary, 'market_demand'),
-                ('competitor_summary', pipeline.prompts.generate_competitor_summary, 'competitor'),
-                ('market_funding_summary', pipeline.prompts.generate_market_funding_summary, 'market_funding'),
-                ('growth_potential_summary', pipeline.prompts.generate_growth_potential_summary, 'growth_potential'),
-                ('swot_summary', pipeline.prompts.generate_swot_summary, 'swot'),
-            ]
-            
-            for sum_key, prompt_fn, source_key in summary_types:
-                reports = [r['content'] for r in per_company.get(source_key, [])]
-                if reports:
-                    summaries[sum_key] = await pipeline._call_ai(
-                        prompt_fn(reports, num_companies),
-                        max_tokens=4000
+                try:
+                    # Call AI
+                    report_content = await pipeline._call_ai(
+                        pipeline.prompts.generate_company_summary(company)
                     )
+                    
+                    deep_dive_reports.append({
+                        "company_name": company_name,
+                        "content": report_content
+                    })
+                    
+                    # Save per-company analysis to JSON
+                    try:
+                        org_id = str(project.organization_id) if project.organization_id else 'default'
+                        await save_section(
+                            project_id=str(project.id),
+                            org_id=org_id,
+                            version=report.current_version + 1,
+                            section_type='company_deep_dive',
+                            content=report_content,
+                            company_name=company_name
+                        )
+                    except Exception as save_err:
+                        logger.warning(f"Failed to save company_deep_dive JSON for {company_name}: {save_err}")
+                        
+                except Exception as e:
+                    logger.error(f"Analysis failed for {company_name}: {e}")
+                    deep_dive_reports.append({
+                        "company_name": company_name,
+                        "content": f"Analysis error: {str(e)}"
+                    })
+
+                # Close DB connections occasionally
+                if idx % 3 == 0:
+                    await sync_to_async(close_old_connections)()
             
-            await complete_step('summaries', {'summaries_generated': len(summaries)})
+            await complete_step('company_deep_dive', {'companies_analyzed': len(deep_dive_reports)})
+            
+            # --- Part 2: Strategic Summary ---
+            await start_step('strategic_summary')
+            await update_step_message('strategic_summary', "Synthesizing strategic trends...")
+            
+            strategic_summary = await pipeline._call_ai(
+                pipeline.prompts.generate_strategic_summary(companies_for_analysis)
+            )
+            
+            # Save summary to JSON
+            try:
+                org_id = str(project.organization_id) if project.organization_id else 'default'
+                await save_summary(
+                    project_id=str(project.id),
+                    org_id=org_id,
+                    version=report.current_version + 1,
+                    summary_type='strategic_summary',
+                    content=strategic_summary
+                )
+            except Exception as e:
+                 logger.warning(f"Failed to save strategic_summary JSON: {e}")
+            
+            await complete_step('strategic_summary')
+
+            # --- Part 3: Fast Analysis ---
+            await start_step('fast_analysis')
+            await update_step_message('fast_analysis', "Generating executive flash report...")
+            
+            fast_analysis = await pipeline._call_ai(
+                pipeline.prompts.generate_fast_analysis(companies_for_analysis)
+            )
+            
+            # Save summary to JSON
+            try:
+                org_id = str(project.organization_id) if project.organization_id else 'default'
+                await save_summary(
+                    project_id=str(project.id),
+                    org_id=org_id,
+                    version=report.current_version + 1,
+                    summary_type='fast_analysis',
+                    content=fast_analysis
+                )
+            except Exception as e:
+                 logger.warning(f"Failed to save fast_analysis JSON: {e}")
+            
+            await complete_step('fast_analysis')
             
             return {
-                'company_overview': overview,
-                'per_company': per_company,
-                'summaries': summaries,
+                'company_deep_dive': deep_dive_reports,
+                'strategic_summary': strategic_summary,
+                'fast_analysis': fast_analysis,
                 'company_count': num_companies
             }
         
@@ -424,20 +512,19 @@ def generate_crunchbase_report(self, report_id, user_id):
         finally:
             loop.close()
         
-        # ===== Step 11: Generate HTML =====
+        # ===== Generate HTML =====
         tracker.start_step('html_gen')
         
         # Format result for HTML generator
         formatted_result = {
             'company_count': analysis_result['company_count'],
-            'processing_time': 0,  # Will be calculated
+            'processing_time': 0,
             'sections': {
-                'company_overview': {'content': analysis_result['company_overview'], 'type': 'company_overview'},
-                'per_company': analysis_result['per_company'],
+                'company_deep_dive': analysis_result['company_deep_dive'],
+                'strategic_summary': {'content': analysis_result['strategic_summary'], 'type': 'strategic_summary'},
+                'fast_analysis': {'content': analysis_result['fast_analysis'], 'type': 'fast_analysis'},
             }
         }
-        for sum_key, content in analysis_result['summaries'].items():
-            formatted_result['sections'][sum_key] = {'content': content, 'type': sum_key}
         
         html_content = generate_analysis_html(
             formatted_result,
@@ -446,39 +533,37 @@ def generate_crunchbase_report(self, report_id, user_id):
         
         tracker.complete_step('html_gen', {'html_size': len(html_content)})
         
-        # ===== Step 12: Save =====
+        # ===== Save to DB =====
         tracker.start_step('save')
         
         # Save analysis sections to database
         section_order = 0
         
-        # Save overview
+        # 1. Fast Analysis (First in DB too for easier fetching if ordered)
         ReportAnalysisSection.objects.create(
             report=report,
-            section_type='company_overview',
-            content_markdown=analysis_result['company_overview'],
+            section_type='fast_analysis',
+            content_markdown=analysis_result['fast_analysis'],
             order=section_order
         )
         section_order += 1
         
-        # Save per-company reports
-        for section_type, reports in analysis_result['per_company'].items():
-            for report_item in reports:
-                ReportAnalysisSection.objects.create(
-                    report=report,
-                    section_type=section_type,
-                    company_name=report_item['company_name'],
-                    content_markdown=report_item['content'],
-                    order=section_order
-                )
-                section_order += 1
+        # 2. Strategic Summary
+        ReportAnalysisSection.objects.create(
+            report=report,
+            section_type='strategic_summary',
+            content_markdown=analysis_result['strategic_summary'],
+            order=section_order
+        )
+        section_order += 1
         
-        # Save summaries
-        for sum_key, content in analysis_result['summaries'].items():
+        # 3. Company Deep Dives
+        for report_item in analysis_result['company_deep_dive']:
             ReportAnalysisSection.objects.create(
                 report=report,
-                section_type=sum_key,
-                content_markdown=content,
+                section_type='company_deep_dive',
+                company_name=report_item['company_name'],
+                content_markdown=report_item['content'],
                 order=section_order
             )
             section_order += 1
@@ -508,7 +593,7 @@ def generate_crunchbase_report(self, report_id, user_id):
                 'company_count': analysis_result['company_count'],
                 'sections_count': section_order
             },
-            changes_summary=f"Full 13-step analysis: {analysis_result['company_count']} companies",
+            changes_summary=f"Full 3-Part Analysis: {analysis_result['company_count']} companies",
             generated_by=user
         )
         
@@ -525,11 +610,37 @@ def generate_crunchbase_report(self, report_id, user_id):
         report.completed_at = timezone.now()
         report.save()
         
+        # Save report metadata JSON
+        try:
+            org_id = str(project.organization_id) if project.organization_id else 'default'
+            report_storage.save_report_metadata(
+                project_id=str(project.id),
+                org_id=org_id,
+                version=report.current_version,
+                metadata={
+                    'report_id': str(report.id),
+                    'project_id': str(project.id),
+                    'org_id': org_id,
+                    'keywords': keywords,
+                    'target_description': target_description,
+                    'company_count': analysis_result['company_count'],
+                    'sections_count': section_order,
+                    'generated_at': report.completed_at.isoformat() if report.completed_at else None,
+                    'version': report.current_version,
+                    'status': 'success'
+                },
+                report_type='crunchbase'
+            )
+            logger.info(f"✅ Saved report metadata JSON for project {project.id}")
+        except Exception as e:
+            logger.warning(f"Failed to save report metadata JSON: {e}")
+        
         tracker.complete_step('save', {'version': report.current_version, 'sections': section_order})
         
         logger.info(f"✅ Crunchbase report generated for project {project.id} with {section_order} sections")
         return {"status": "success", "version": report.current_version, "sections": section_order}
         
+
     except Exception as e:
         logger.error(f"❌ Failed to generate Crunchbase report: {e}")
         if report:
@@ -547,22 +658,333 @@ def generate_crunchbase_report(self, report_id, user_id):
 
 
 @shared_task(bind=True, queue='reports')
-def generate_tracxn_report(self, report_id, user_id):
+def generate_social_report(self, report_id, user_id):
     """
-    Generate Tracxn analysis report using 6-step AI pipeline.
-    Per FINAL_ARCHITECTURE - Panel 2: Tracxn Analysis
+    Generate Social Media (Twitter) analysis report.
+    Per Task Plan.
     
     Pipeline Steps:
-    1. Initialize & Generate Keywords
-    2. Search Tracxn API  
+    1. Generate Social Keywords (User needs -> Hashtags/Phrases)
+    2. Search Twitter via Orchestrator (Top & Latest)
+    3. Analyze Tweets (Segmentation, JTBD, Pain Points, WTP, Competitors, Sentiment)
+    4. Generate Executive Summary
+    5. Save Report
+    """
+    from .models import Report, ReportVersion, ReportAnalysisSection
+    from .progress_tracker import ReportProgressTracker
+    from apps.users.models import User
+    from services.keyword_generator import generate_social_keywords_async
+    from services.scrapers.twitter_scraper import twitter_scraper
+    from services.twitter_analysis import TwitterAnalysisPipeline
+    from core.storage import storage_service
+    from services.report_storage import report_storage
+    
+    report = None
+    tracker = None
+    
+    try:
+        report = Report.objects.get(id=report_id)
+        user = User.objects.get(id=user_id)
+        project = report.project
+        inputs = project.inputs
+        
+        # Mark as running
+        report.status = 'running'
+        report.started_at = timezone.now()
+        report.save()
+        
+        # Initialize progress tracker
+        tracker = ReportProgressTracker(report)
+        tracker.initialize_steps() # Assumes social steps are defined or generic enough
+        
+        # ===== Step 1: Generate Social Keywords =====
+        tracker.start_step('init')
+        tracker.update_step_message('init', "Generating social media search keywords...")
+        
+        project_input_dict = get_project_inputs_dict(inputs)
+        
+        # Force fresh generation for social (different from crunchbase keywords)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            kw_result = loop.run_until_complete(generate_social_keywords_async(project_input_dict))
+            keywords = kw_result['keywords']
+            target_desc = kw_result['target_description']
+            
+            # Save to report data for reference (keywords used)
+            report.data['social_keywords'] = keywords
+            report.save()
+            
+            for kw in keywords:
+                tracker.add_step_detail('init', 'keyword', kw, {'keyword': kw})
+            
+            tracker.complete_step('init', {'keywords_count': len(keywords)})
+            
+        except Exception as e:
+            logger.error(f"Keyword generation failed: {e}")
+            tracker.fail_step('init', str(e))
+            raise
+        
+        # ===== Step 2: Search Twitter =====
+        tracker.start_step('api_search')
+        
+        # Search for top keywords
+        # Using top 3 keywords as requested
+        search_keywords = keywords[:3]
+        tracker.update_step_message('api_search', f"Searching Twitter for {len(search_keywords)} topics...")
+        
+        all_tweets = []
+        try:
+            # Run searches sequentially with delay to respect rate limit (5s)
+            results_list = []
+            
+            for i, kw in enumerate(search_keywords):
+                if i > 0:
+                    tracker.update_step_message('api_search', f"Waiting 6s before next search (Rate Limit)...")
+                    # Wait 6s between requests
+                    loop.run_until_complete(asyncio.sleep(6))
+                
+                tracker.update_step_message('api_search', f"Searching for '{kw}'...")
+                
+                try:
+                    res = loop.run_until_complete(
+                        twitter_scraper.search_tweets(
+                            keywords=[kw],
+                            limit=10,
+                            report_id=str(report.id)
+                        )
+                    )
+                    
+                    # Process result immediately
+                    if isinstance(res, dict) and 'tweets' in res:
+                        found_count = len(res['tweets'])
+                        all_tweets.extend(res['tweets'])
+                        
+                        # Prepare detail message and data
+                        message = f"Found {found_count} tweets for '{kw}'"
+                        detail_data = {'keyword': kw, 'count': found_count}
+                        
+                        # Add top tweet info if available (for expandable description)
+                        if res['tweets']:
+                            top_tweet = res['tweets'][0]
+                            author_name = top_tweet.get('author', {}).get('name', 'Unknown')
+                            tweet_text = top_tweet.get('text', '')
+                            
+                            # The frontend likely uses 'description' for expandable content
+                            detail_data['description'] = f"@{author_name}: {tweet_text}"
+                            detail_data['top_tweet_id'] = top_tweet.get('id')
+                            
+                            # Update title to include preview
+                            preview = tweet_text[:50] + "..." if len(tweet_text) > 50 else tweet_text
+                            # Ensure full text is available for frontend expansion
+                            if 'full_text' not in detail_data:
+                                detail_data['full_text'] = tweet_text
+
+                            message += f" - Top: {preview}"
+
+                        tracker.add_step_detail(
+                            'api_search', 
+                            'search_result', 
+                            message, 
+                            detail_data
+                        )
+                    elif isinstance(res, Exception):
+                        logger.warning(f"Search failed for '{kw}': {res}")
+                        tracker.add_step_detail('api_search', 'error', f"Search failed for '{kw}': {str(res)}")
+                    
+                except Exception as e:
+                    logger.error(f"Search failed for '{kw}': {e}")
+                    tracker.add_step_detail('api_search', 'error', f"Search failed for '{kw}': {str(e)}")
+            
+            tracker.update_step_message('api_search', f"Found {len(all_tweets)} unique tweets.")
+            # Dedup tweets by ID
+            seen_ids = set()
+            unique_tweets = []
+            for t in all_tweets:
+                if t['id'] not in seen_ids:
+                    seen_ids.add(t['id'])
+                    unique_tweets.append(t)
+            all_tweets = unique_tweets
+            
+            tracker.update_step_message('api_search', f"Found {len(all_tweets)} unique tweets.")
+            tracker.complete_step('api_search', {'tweets_found': len(all_tweets)})
+            
+            # Save Raw Data
+            try:
+                org_id = str(project.organization_id) if project.organization_id else 'default'
+                report_storage.save_twitter_raw_data(
+                    project_id=str(project.id),
+                    org_id=org_id,
+                    version=report.current_version + 1,
+                    raw_data=all_tweets
+                )
+                logger.info(f"✅ Saved raw Twitter data to S3")
+                
+                # Save to DB (Dual-Write)
+                from .models import ReportRawData
+                ReportRawData.objects.create(
+                    report=report,
+                    version=report.current_version + 1,
+                    report_type='social',
+                    data=all_tweets
+                )
+                logger.info(f"✅ Saved raw Twitter data to DB")
+            except Exception as e:
+                logger.warning(f"Failed to save raw Twitter data: {e}")
+            
+        except Exception as e:
+            logger.error(f"Twitter search failed: {e}")
+            tracker.fail_step('api_search', str(e))
+            raise
+
+        # ===== Step 3: Analysis =====
+        # ===== Step 3: Analyze Tweets =====
+        # Note: Pipeline handles tracking of granular analysis steps internally
+        
+        analysis_pipeline = TwitterAnalysisPipeline(target_market_description=target_desc)
+        
+        from asgiref.sync import sync_to_async
+        
+        class AsyncTracker:
+            def __init__(self, tracker):
+                self.tracker = tracker
+            
+            async def start_step(self, *args, **kwargs):
+                await sync_to_async(self.tracker.start_step)(*args, **kwargs)
+
+            async def update_step_message(self, *args, **kwargs):
+                await sync_to_async(self.tracker.update_step_message)(*args, **kwargs)
+
+            async def add_step_detail(self, *args, **kwargs):
+                await sync_to_async(self.tracker.add_step_detail)(*args, **kwargs)
+
+            async def complete_step(self, *args, **kwargs):
+                await sync_to_async(self.tracker.complete_step)(*args, **kwargs)
+                
+            async def fail_step(self, *args, **kwargs):
+                await sync_to_async(self.tracker.fail_step)(*args, **kwargs)
+
+        async_tracker = AsyncTracker(tracker)
+        
+        try:
+            analysis_results = loop.run_until_complete(
+                analysis_pipeline.analyze(all_tweets, tracker=async_tracker)
+            )
+        except Exception as e:
+            logger.error(f"Analysis failed: {e}")
+            raise
+            raise
+
+        # ===== Step 4: Save & Generate HTML =====
+        tracker.start_step('save')
+        
+        section_order = 0
+        
+        # We need to format HTML.
+        # Since we don't have a specific `generate_social_html` yet, we can create a simple one or basic formatting.
+        # Or store JSON sections and let Frontend render.
+        # `generate_crunchbase_report` does both.
+        
+        # Save sections
+        for key, content in analysis_results.items():
+            ReportAnalysisSection.objects.create(
+                report=report,
+                section_type=key,
+                content_markdown=str(content), # It returns JSON string often, or markdown
+                order=section_order
+            )
+            section_order += 1
+            
+            # S3
+            try:
+                org_id = str(project.organization_id) if project.organization_id else 'default'
+                report_storage.save_analysis_section(
+                    project_id=str(project.id),
+                    org_id=org_id,
+                    version=report.current_version + 1,
+                    section_type=key,
+                    content=str(content),  # Convert to string/markdown if it's a dict/json
+                    report_type='social'
+                )
+            except Exception as e:
+                logger.warning(f"S3 save failed: {e}")
+
+        # Finalize
+        # Create a simple HTML report for now
+        html_content = f"<h1>Social Media Analysis for {project.name}</h1>"
+        html_content += f"<h2>Executive Summary</h2><p>{analysis_results.get('executive_summary', '')}</p>"
+        
+        report.current_version += 1
+        ReportVersion.objects.create(
+            report=report,
+            version_number=report.current_version,
+            html_content=html_content,
+            data_snapshot={'tweet_count': len(all_tweets)},
+            changes_summary=f"Analysis of {len(all_tweets)} tweets",
+            generated_by=user
+        )
+        
+        report.status = 'completed'
+        report.progress = 100
+        report.current_step = 'Complete!'
+        report.html_content = html_content
+        report.save()
+        
+        # Save report metadata JSON
+        try:
+            org_id = str(project.organization_id) if project.organization_id else 'default'
+            report_storage.save_report_metadata(
+                project_id=str(project.id),
+                org_id=org_id,
+                version=report.current_version,
+                metadata={
+                    'report_id': str(report.id),
+                    'project_id': str(project.id),
+                    'org_id': org_id,
+                    'keywords': keywords,
+                    'tweets_count': len(all_tweets),
+                    'sections_count': section_order,
+                    'generated_at': report.completed_at.isoformat() if report.completed_at else None,
+                    'version': report.current_version,
+                    'status': 'success'
+                },
+                report_type='social'
+            )
+            logger.info(f"✅ Saved Social report metadata JSON for project {project.id}")
+        except Exception as e:
+            logger.warning(f"Failed to save Social report metadata JSON: {e}")
+        
+        tracker.complete_step('save')
+        loop.close()
+        
+        return {"status": "success", "tweets": len(all_tweets)}
+
+    except Exception as e:
+        logger.error(f"❌ Failed to generate Social report: {e}")
+        if report:
+            report.status = 'failed'
+            report.error_message = str(e)
+            report.save()
+        raise
+
+
+
+@shared_task(bind=True, queue='reports')
+def generate_tracxn_report(self, report_id, user_id):
+    """
+    Generate Tracxn analysis report using 3-step institutional-grade AI pipeline.
+    
+    Pipeline Steps:
+    1. Initialize & Generate Tracxn Keywords
+    2. Search Tracxn API via Orchestrator
     3. Rank Results by Similarity
     4. Fetch Startup Details
-    5. Competitor Analysis (per startup)
-    6. Market & Funding Analysis (per startup)
-    7. Growth Potential Analysis (per startup)
-    8. Executive Summaries
-    9. Generate HTML Report
-    10. Save Report
+    5. Flash Analysis (2-page market flash report)
+    6. Company Deep Dive (comprehensive due diligence per company)
+    7. Executive Summary (5-page strategic assessment)
+    8. Generate HTML Report
+    9. Save Report to DB and S3
     """
     from .models import Report, ReportVersion, ReportAnalysisSection
     from .progress_tracker import ReportProgressTracker
@@ -594,38 +1016,34 @@ def generate_tracxn_report(self, report_id, user_id):
         
         # Check if we need to generate keywords using AI
         if not inputs.extracted_keywords or len(inputs.extracted_keywords) == 0:
-            try:
-                from services.keyword_generator import KeywordGenerator
-                
-                tracker.update_step_message('init', "Generating AI-powered search keywords...")
-                logger.info("🔑 Generating search keywords using Liara AI...")
-                generator = KeywordGenerator()
-                project_input_dict = get_project_inputs_dict(inputs)
-                search_params = generator.generate(project_input_dict)
-                
-                keywords = search_params['keywords']
-                target_description = search_params['target_description']
-                
-                # Save generated keywords
-                inputs.extracted_keywords = keywords
-                inputs.target_description = target_description
-                inputs.save(update_fields=['extracted_keywords', 'target_description'])
-                
-                # Add keywords as step details
-                for kw in keywords:
-                    tracker.add_step_detail('init', 'keyword', kw, {'keyword': kw})
-                
-                keywords_preview = ', '.join(keywords[:5])
-                if len(keywords) > 5:
-                    keywords_preview += f' +{len(keywords) - 5} more'
-                tracker.update_step_message('init', f"Keywords ready: {keywords_preview}")
-                logger.info(f"✅ AI generated {len(keywords)} keywords")
-                
-            except Exception as e:
-                logger.warning(f"AI keyword generation failed, using fallback: {e}")
-                keywords = build_search_keywords(inputs)
-                target_description = inputs.startup_description or inputs.startup_name or ''
-                tracker.add_step_detail('init', 'fallback', f"Using fallback keywords: {e}")
+            # Generate Tracxn-specific keywords using Liara AI - NO FALLBACK
+            from services.keyword_generator import KeywordGenerator
+            
+            tracker.update_step_message('init', "Generating AI-powered Tracxn search keywords...")
+            logger.info("🔑 Generating Tracxn keywords using Liara AI (forced tool calling)...")
+            
+            generator = KeywordGenerator()
+            project_input_dict = get_project_inputs_dict(inputs)
+            # Use Tracxn-specific keyword generation for better startup ecosystem terms
+            search_params = generator.generate_tracxn_keywords(project_input_dict)  # Will raise exception if fails
+            
+            keywords = search_params['keywords']
+            target_description = search_params['target_description']
+            
+            # Save generated keywords
+            inputs.extracted_keywords = keywords
+            inputs.target_description = target_description
+            inputs.save(update_fields=['extracted_keywords', 'target_description'])
+            
+            # Add keywords as step details
+            for kw in keywords:
+                tracker.add_step_detail('init', 'keyword', kw, {'keyword': kw})
+            
+            keywords_preview = ', '.join(keywords[:5])
+            if len(keywords) > 5:
+                keywords_preview += f' +{len(keywords) - 5} more'
+            tracker.update_step_message('init', f"Keywords ready: {keywords_preview}")
+            logger.info(f"✅ AI generated {len(keywords)} keywords")
         else:
             keywords = inputs.extracted_keywords
             target_description = inputs.target_description or inputs.startup_description or ''
@@ -642,9 +1060,14 @@ def generate_tracxn_report(self, report_id, user_id):
         tracker.complete_step('init', {'keywords_count': len(keywords)})
         
         # ===== Step 2: API Search =====
+        # Note: The Tracxn API also sends status updates for 'sorting' and 'fetching_details'
+        # during the search_with_ranking call. We start those steps now so updates flow correctly.
         tracker.start_step('api_search')
         keywords_list = ', '.join(keywords[:3])
         tracker.update_step_message('api_search', f"Searching Tracxn with {len(keywords)} keywords: {keywords_list}...")
+        
+        # Pre-start sorting and fetching_details so API status updates appear in real-time
+        # These steps happen inside search_with_ranking() and send status updates via callback
         
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -664,6 +1087,10 @@ def generate_tracxn_report(self, report_id, user_id):
             top_companies = result.get('top_companies_full_data', [])
             metadata = result.get('metadata', {})
             
+            # Close old DB connections to prevent timeouts after long blocking call
+            from django.db import close_old_connections
+            close_old_connections()
+            
             total_unique = metadata.get('total_unique_companies', len(all_companies))
             tracker.update_step_message(
                 'api_search', 
@@ -677,6 +1104,30 @@ def generate_tracxn_report(self, report_id, user_id):
                 'all_companies_found': len(all_companies),
                 'top_companies': len(top_companies),
             })
+            
+            # Save raw data to S3/MinIO
+            try:
+                from services.report_storage import report_storage
+                org_id = str(project.organization_id) if project.organization_id else 'default'
+                report_storage.save_tracxn_raw_data(
+                    project_id=str(project.id),
+                    org_id=org_id,
+                    version=report.current_version + 1,
+                    raw_data=top_companies
+                )
+                logger.info(f"✅ Saved raw Tracxn data to S3")
+                
+                # Save to DB (Dual-Write)
+                from .models import ReportRawData
+                ReportRawData.objects.create(
+                    report=report,
+                    version=report.current_version + 1,
+                    report_type='tracxn',
+                    data=top_companies
+                )
+                logger.info(f"✅ Saved raw Tracxn data to DB")
+            except Exception as e:
+                logger.warning(f"Failed to save raw Tracxn data: {e}")
             
         except Exception as e:
             logger.warning(f"Tracxn scraper failed: {e}")
@@ -692,8 +1143,8 @@ def generate_tracxn_report(self, report_id, user_id):
         
         top_startup_names = []
         for c in top_companies[:15]:
-            company_data = c.get('company_data', c)
-            name = company_data.get('name') or company_data.get('Name') or 'Unknown'
+            # Use name from wrapper directly
+            name = c.get('name') or 'Unknown'
             if name and name != 'Unknown':
                 top_startup_names.append(name)
         
@@ -705,16 +1156,30 @@ def generate_tracxn_report(self, report_id, user_id):
         else:
             tracker.update_step_message('sorting', f"Ranking {len(top_companies)} startups by similarity...")
         
-        # Parse company data for analysis
-        startups_for_analysis = [
-            tracxn_scraper.parse_company_data(c.get('company_data', c)) 
-            for c in top_companies[:15]
-        ]
+        # Use raw company data for analysis (skipped normalization as requested)
+        # We need to inject 'name' so downstream logic (logs, report headers) works
+        startups_for_analysis = []
+        for c in top_companies[:15]:
+            raw_data = c.get('full_data', c)
+            # Ensure it's a dict
+            if not isinstance(raw_data, dict):
+                raw_data = {'raw_content': str(raw_data)}
+            
+            # Inject name from wrapper if missing in top level
+            if 'name' not in raw_data and c.get('name'):
+                raw_data['name'] = c.get('name')
+                
+            startups_for_analysis.append(raw_data)
         
         # Add sorted startups as step details
-        for idx, startup in enumerate(startups_for_analysis, 1):
-            name = startup.get('name', 'Unknown')
-            score = startup.get('combined_score', startup.get('tracxn_score', 'N/A'))
+        for idx, c in enumerate(top_companies[:15], 1):
+            name = c.get('name', 'Unknown')
+            # Use scores from the wrapper object (c)
+            score = c.get('combined_score', c.get('tracxn_score', 'N/A'))
+            
+            if isinstance(score, float):
+                score = f"{score:.2f}"
+                
             tracker.add_step_detail(
                 'sorting',
                 'startup_rank',
@@ -727,18 +1192,18 @@ def generate_tracxn_report(self, report_id, user_id):
         if not startups_for_analysis:
             raise Exception("No startups found for analysis")
         
-        # ===== Step 4: Fetching Details =====
+        # ===== Step 4: Gathering Full Data =====
         tracker.start_step('fetching_details')
         tracker.update_step_message(
             'fetching_details',
-            f"Processing {len(startups_for_analysis)} startups...",
+            f"Gathering full data for {len(startups_for_analysis)} startups...",
             progress_percent=50
         )
         tracker.complete_step('fetching_details', {'startups_processed': len(startups_for_analysis)})
         
-        # ===== Steps 5-8: Run AI Analysis Pipeline =====
+        # ===== Steps 5-7: Run 3-Step Institutional AI Analysis Pipeline =====
         async def run_analysis_with_tracking():
-            """Run analysis pipeline with step-by-step progress updates."""
+            """Run 3-step institutional analysis pipeline with progress updates."""
             from asgiref.sync import sync_to_async
             
             start_step = sync_to_async(tracker.start_step, thread_sensitive=True)
@@ -751,83 +1216,53 @@ def generate_tracxn_report(self, report_id, user_id):
             
             num_startups = len(startups_for_analysis)
             
-            # Step 5: Competitor Analysis
-            await start_step('competitor')
-            competitor_reports = []
+            # Step 5: Company Deep Dive (per company comprehensive analysis)
+            await start_step('company_deep_dive')
+            company_reports = []
             for startup in startups_for_analysis:
                 startup_name = startup.get('name', 'Unknown')
                 try:
-                    prompt = pipeline.prompts.generate_competitor_report(startup, target_description)
-                    content = await pipeline._call_ai(prompt)
-                    competitor_reports.append({'company_name': startup_name, 'content': content})
+                    prompt = pipeline.prompts.generate_comprehensive_company_analysis(
+                        startup, target_description
+                    )
+                    content = await pipeline._call_ai(prompt, max_tokens=4000)
+                    company_reports.append({'company_name': startup_name, 'content': content})
                 except Exception as e:
-                    logger.error(f"Competitor analysis failed for {startup_name}: {e}")
-                    competitor_reports.append({'company_name': startup_name, 'content': f"Analysis error: {str(e)}"})
-            await complete_step('competitor', {'startups_analyzed': len(competitor_reports)})
+                    logger.error(f"Company deep dive failed for {startup_name}: {e}")
+                    company_reports.append({'company_name': startup_name, 'content': f"Analysis error: {str(e)}"})
+            await complete_step('company_deep_dive', {'startups_analyzed': len(company_reports)})
             
-            # Step 6: Market & Funding Analysis
-            await start_step('market_funding')
-            market_funding_reports = []
-            for startup in startups_for_analysis:
-                startup_name = startup.get('name', 'Unknown')
-                try:
-                    prompt = pipeline.prompts.generate_market_funding_report(startup, target_description)
-                    content = await pipeline._call_ai(prompt)
-                    market_funding_reports.append({'company_name': startup_name, 'content': content})
-                except Exception as e:
-                    logger.error(f"Market funding analysis failed for {startup_name}: {e}")
-                    market_funding_reports.append({'company_name': startup_name, 'content': f"Analysis error: {str(e)}"})
-            await complete_step('market_funding', {'startups_analyzed': len(market_funding_reports)})
+            # Step 6: Executive Summary (5-page strategic assessment)
+            await start_step('executive_summary')
+            try:
+                report_texts = [r['content'] for r in company_reports]
+                prompt = pipeline.prompts.generate_executive_summary(
+                    report_texts, num_startups, target_description
+                )
+                executive_summary = await pipeline._call_ai(prompt, max_tokens=5000)
+            except Exception as e:
+                logger.error(f"Executive summary failed: {e}")
+                executive_summary = f"Analysis error: {str(e)}"
+            await complete_step('executive_summary', {'summary_generated': True})
             
-            # Step 7: Growth Potential Analysis
-            await start_step('growth_potential')
-            growth_potential_reports = []
-            for startup in startups_for_analysis:
-                startup_name = startup.get('name', 'Unknown')
-                try:
-                    prompt = pipeline.prompts.generate_growth_potential_report(startup, target_description)
-                    content = await pipeline._call_ai(prompt)
-                    growth_potential_reports.append({'company_name': startup_name, 'content': content})
-                except Exception as e:
-                    logger.error(f"Growth potential analysis failed for {startup_name}: {e}")
-                    growth_potential_reports.append({'company_name': startup_name, 'content': f"Analysis error: {str(e)}"})
-            await complete_step('growth_potential', {'startups_analyzed': len(growth_potential_reports)})
-            
-            # Step 8: Executive Summaries
-            await start_step('summaries')
-            summaries = {}
-            
-            # Competitor Summary
-            competitor_texts = [r['content'] for r in competitor_reports]
-            summaries['competitor_summary'] = await pipeline._call_ai(
-                pipeline.prompts.generate_competitor_summary(competitor_texts, num_startups, target_description),
-                max_tokens=4000
-            )
-            
-            # Market Funding Summary
-            market_texts = [r['content'] for r in market_funding_reports]
-            summaries['market_funding_summary'] = await pipeline._call_ai(
-                pipeline.prompts.generate_market_funding_summary(market_texts, num_startups, target_description),
-                max_tokens=4000
-            )
-            
-            # Growth Potential Summary
-            growth_texts = [r['content'] for r in growth_potential_reports]
-            summaries['growth_potential_summary'] = await pipeline._call_ai(
-                pipeline.prompts.generate_growth_potential_summary(growth_texts, num_startups, target_description),
-                max_tokens=4000
-            )
-            
-            await complete_step('summaries', {'summaries_generated': len(summaries)})
+            # Step 7: Flash Analysis (2-page market flash report - synthesizing all analysis)
+            await start_step('flash_analysis')
+            try:
+                # Pass company reports to flash analysis so it can synthesize the findings
+                prompt = pipeline.prompts.generate_flash_analysis_report(
+                    company_reports, executive_summary, target_description
+                )
+                flash_analysis = await pipeline._call_ai(prompt, max_tokens=3000)
+            except Exception as e:
+                logger.error(f"Flash analysis failed: {e}")
+                flash_analysis = f"Analysis error: {str(e)}"
+            await complete_step('flash_analysis', {'report_generated': True})
             
             return {
-                'competitor_reports': competitor_reports,
-                'market_funding_reports': market_funding_reports,
-                'growth_potential_reports': growth_potential_reports,
-                'competitor_summary': summaries['competitor_summary'],
-                'market_funding_summary': summaries['market_funding_summary'],
-                'growth_potential_summary': summaries['growth_potential_summary'],
                 'company_count': num_startups,
+                'company_reports': company_reports,
+                'executive_summary': executive_summary,
+                'flash_analysis': flash_analysis,
             }
         
         # Run the analysis
@@ -838,19 +1273,16 @@ def generate_tracxn_report(self, report_id, user_id):
         finally:
             loop.close()
         
-        # ===== Step 9: Generate HTML =====
+        # ===== Step 8: Generate HTML =====
         tracker.start_step('html_gen')
         
-        # Format result for HTML generator
+        # Format result for HTML generator (new 3-step structure)
         formatted_result = {
             'company_count': analysis_result['company_count'],
             'processing_time': 0,
-            'competitor_reports': analysis_result['competitor_reports'],
-            'market_funding_reports': analysis_result['market_funding_reports'],
-            'growth_potential_reports': analysis_result['growth_potential_reports'],
-            'competitor_summary': analysis_result['competitor_summary'],
-            'market_funding_summary': analysis_result['market_funding_summary'],
-            'growth_potential_summary': analysis_result['growth_potential_summary'],
+            'flash_analysis': analysis_result['flash_analysis'],
+            'company_reports': analysis_result['company_reports'],
+            'executive_summary': analysis_result['executive_summary'],
         }
         
         html_content = generate_tracxn_html(
@@ -860,69 +1292,85 @@ def generate_tracxn_report(self, report_id, user_id):
         
         tracker.complete_step('html_gen', {'html_size': len(html_content)})
         
-        # ===== Step 10: Save =====
+        # ===== Step 9: Save =====
         tracker.start_step('save')
         
         # Save analysis sections to database
         section_order = 0
         
-        # Save competitor reports
-        for report_item in analysis_result['competitor_reports']:
+        # Save Flash Analysis (Dual-Write: DB + S3)
+        if analysis_result.get('flash_analysis'):
             ReportAnalysisSection.objects.create(
                 report=report,
-                section_type='competitor',
+                section_type='flash_analysis',
+                content_markdown=analysis_result['flash_analysis'],
+                order=section_order
+            )
+            section_order += 1
+            
+            if getattr(settings, 'USE_S3', False):
+                try:
+                    org_id = str(project.organization_id) if project.organization_id else 'default'
+                    report_storage.save_analysis_section(
+                        project_id=str(project.id),
+                        org_id=org_id,
+                        version=report.current_version + 1,
+                        section_type='flash_analysis',
+                        content=analysis_result['flash_analysis'],
+                        report_type='tracxn'
+                    )
+                except Exception as e:
+                    logger.warning(f"S3 flash analysis save failed: {e}")
+        
+        # Save Company Deep Dive Reports (Dual-Write: DB + S3)
+        for report_item in analysis_result.get('company_reports', []):
+            ReportAnalysisSection.objects.create(
+                report=report,
+                section_type='company_deep_dive',
                 company_name=report_item['company_name'],
                 content_markdown=report_item['content'],
                 order=section_order
             )
             section_order += 1
+            
+            if getattr(settings, 'USE_S3', False):
+                try:
+                    org_id = str(project.organization_id) if project.organization_id else 'default'
+                    report_storage.save_analysis_section(
+                        project_id=str(project.id),
+                        org_id=org_id,
+                        version=report.current_version + 1,
+                        section_type='company_deep_dive',
+                        content=report_item['content'],
+                        company_name=report_item['company_name'],
+                        report_type='tracxn'
+                    )
+                except Exception as e:
+                    logger.warning(f"S3 company deep dive save failed for {report_item['company_name']}: {e}")
         
-        # Save market funding reports
-        for report_item in analysis_result['market_funding_reports']:
+        # Save Executive Summary (Dual-Write: DB + S3)
+        if analysis_result.get('executive_summary'):
             ReportAnalysisSection.objects.create(
                 report=report,
-                section_type='market_funding',
-                company_name=report_item['company_name'],
-                content_markdown=report_item['content'],
+                section_type='executive_summary',
+                content_markdown=analysis_result['executive_summary'],
                 order=section_order
             )
             section_order += 1
-        
-        # Save growth potential reports
-        for report_item in analysis_result['growth_potential_reports']:
-            ReportAnalysisSection.objects.create(
-                report=report,
-                section_type='growth_potential',
-                company_name=report_item['company_name'],
-                content_markdown=report_item['content'],
-                order=section_order
-            )
-            section_order += 1
-        
-        # Save summaries
-        ReportAnalysisSection.objects.create(
-            report=report,
-            section_type='competitor_summary',
-            content_markdown=analysis_result['competitor_summary'],
-            order=section_order
-        )
-        section_order += 1
-        
-        ReportAnalysisSection.objects.create(
-            report=report,
-            section_type='market_funding_summary',
-            content_markdown=analysis_result['market_funding_summary'],
-            order=section_order
-        )
-        section_order += 1
-        
-        ReportAnalysisSection.objects.create(
-            report=report,
-            section_type='growth_potential_summary',
-            content_markdown=analysis_result['growth_potential_summary'],
-            order=section_order
-        )
-        section_order += 1
+            
+            if getattr(settings, 'USE_S3', False):
+                try:
+                    org_id = str(project.organization_id) if project.organization_id else 'default'
+                    report_storage.save_analysis_summary(
+                        project_id=str(project.id),
+                        org_id=org_id,
+                        version=report.current_version + 1,
+                        summary_type='executive_summary',
+                        content=analysis_result['executive_summary'],
+                        report_type='tracxn'
+                    )
+                except Exception as e:
+                    logger.warning(f"S3 executive summary save failed: {e}")
         
         # Save to S3 if enabled
         if getattr(settings, 'USE_S3', False):
@@ -932,7 +1380,6 @@ def generate_tracxn_report(self, report_id, user_id):
                     org_id=org_id,
                     project_id=str(project.id),
                     report_type='tracxn',
-                    report_id=str(report.id),
                     content=html_content.encode(),
                     file_type='html'
                 )
@@ -949,7 +1396,7 @@ def generate_tracxn_report(self, report_id, user_id):
                 'company_count': analysis_result['company_count'],
                 'sections_count': section_order
             },
-            changes_summary=f"6-step Tracxn analysis: {analysis_result['company_count']} startups",
+            changes_summary=f"3-step Institutional Tracxn analysis: {analysis_result['company_count']} startups",
             generated_by=user
         )
         
@@ -966,6 +1413,31 @@ def generate_tracxn_report(self, report_id, user_id):
         report.completed_at = timezone.now()
         report.save()
         
+        # Save report metadata JSON
+        try:
+            org_id = str(project.organization_id) if project.organization_id else 'default'
+            report_storage.save_report_metadata(
+                project_id=str(project.id),
+                org_id=org_id,
+                version=report.current_version,
+                metadata={
+                    'report_id': str(report.id),
+                    'project_id': str(project.id),
+                    'org_id': org_id,
+                    'keywords': keywords,
+                    'target_description': target_description,
+                    'company_count': analysis_result['company_count'],
+                    'sections_count': section_order,
+                    'generated_at': report.completed_at.isoformat() if report.completed_at else None,
+                    'version': report.current_version,
+                    'status': 'success'
+                },
+                report_type='tracxn'
+            )
+            logger.info(f"✅ Saved Tracxn report metadata JSON for project {project.id}")
+        except Exception as e:
+            logger.warning(f"Failed to save Tracxn report metadata JSON: {e}")
+            
         tracker.complete_step('save', {'version': report.current_version, 'sections': section_order})
         
         logger.info(f"✅ Tracxn report generated for project {project.id} with {section_order} sections")
@@ -984,47 +1456,6 @@ def generate_tracxn_report(self, report_id, user_id):
                 ).first()
                 if running_step:
                     tracker.fail_step(running_step.step_key, str(e))
-        raise
-
-
-@shared_task(bind=True, queue='reports')
-def generate_social_report(self, report_id, user_id):
-    """
-    Generate Social analysis report.
-    
-    NOTE: This feature is currently DISABLED.
-    Twitter and LinkedIn scrapers have been removed from the project.
-    """
-    from .models import Report
-    from apps.users.models import User
-    
-    try:
-        report = Report.objects.get(id=report_id)
-        user = User.objects.get(id=user_id)
-        project = report.project
-        
-        # Feature is disabled
-        report.status = 'failed'
-        report.progress = 0
-        report.current_step = 'Feature temporarily disabled'
-        report.error_message = (
-            'Social Analysis (Twitter/LinkedIn) is currently disabled. '
-            'This feature will be available in a future update.'
-        )
-        report.save()
-        
-        send_progress_update(
-            str(report.project_id), 
-            'social', 
-            0, 
-            'Feature disabled'
-        )
-        
-        logger.info(f"Social report disabled for project {project.id}")
-        return {"status": "disabled", "message": "Social Analysis feature is currently disabled"}
-        
-    except Exception as e:
-        logger.error(f"❌ Error in disabled social report: {e}")
         raise
 
 
@@ -1162,3 +1593,191 @@ def generate_pitch_deck(self, report_id, user_id):
         report.error_message = str(e)
         report.save()
         raise
+
+
+@shared_task(bind=True, queue='reports')
+@close_db_wrapper
+def generate_quick_report(self, report_id, user_id):
+    """
+    Generate Quick Report using AI.
+    Uses comprehensive system prompt to generate market research report.
+    
+    Pipeline Steps:
+    1. Initialize & Build Prompt
+    2. Call AI for Report Generation
+    3. Parse and Save Sections
+    """
+    from .models import Report, ReportVersion, ReportAnalysisSection
+    from .progress_tracker import ReportProgressTracker
+    from apps.users.models import User
+    from services.openai_service import openai_service
+    from services.quick_report_prompts import (
+        get_quick_report_system_prompt,
+        build_user_prompt,
+        parse_report_sections
+    )
+    from services.report_storage import report_storage
+    
+    report = None
+    tracker = None
+    
+    try:
+        report = Report.objects.get(id=report_id)
+        user = User.objects.get(id=user_id)
+        project = report.project
+        inputs = project.inputs
+        
+        # Mark as running
+        report.status = 'running'
+        report.started_at = timezone.now()
+        report.save()
+        
+        # Initialize progress tracker
+        tracker = ReportProgressTracker(report)
+        tracker.initialize_steps()
+        
+        # ===== Step 1: Initialize & Build Prompt =====
+        tracker.start_step('init')
+        tracker.update_step_message('init', "Preparing market research request...")
+        
+        inputs_dict = get_project_inputs_dict(inputs)
+        
+        # Build the prompts
+        system_prompt = get_quick_report_system_prompt()
+        user_prompt = build_user_prompt(inputs_dict)
+        
+        tracker.add_step_detail('init', 'info', f"Startup: {inputs_dict.get('startup_name', 'Unknown')}")
+        tracker.complete_step('init', {'startup_name': inputs_dict.get('startup_name')})
+        
+        # ===== Step 2: AI Generation =====
+        tracker.start_step('api_search')  # Using api_search step key for progress consistency
+        tracker.update_step_message('api_search', "Generating comprehensive market research with AI...")
+        
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            # Call the AI service
+            report_content = loop.run_until_complete(
+                openai_service.chat_completion(
+                    messages=[{"role": "user", "content": user_prompt}],
+                    system_prompt=system_prompt,
+                    temperature=0.7,
+                    max_tokens=8000  # Large response for comprehensive report
+                )
+            )
+            
+            if not report_content or report_content.startswith("AI service is not configured"):
+                raise Exception("AI service unavailable or not configured")
+            
+            tracker.update_step_message('api_search', "AI analysis complete, processing results...")
+            tracker.complete_step('api_search', {'response_length': len(report_content)})
+            
+        except Exception as e:
+            logger.error(f"Quick Report AI generation failed: {e}")
+            tracker.fail_step('api_search', str(e))
+            raise
+        finally:
+            loop.close()
+        
+        # ===== Step 3: Parse and Save Sections =====
+        tracker.start_step('save')
+        tracker.update_step_message('save', "Saving report sections...")
+        
+        # Parse markdown into sections
+        sections = parse_report_sections(report_content)
+        
+        # Delete old sections if any
+        ReportAnalysisSection.objects.filter(report=report).delete()
+        
+        # Save sections to database
+        section_order = 0
+        for section_data in sections:
+            ReportAnalysisSection.objects.create(
+                report=report,
+                section_type=section_data['section_type'],
+                content_markdown=section_data['content'],
+                order=section_order
+            )
+            section_order += 1
+            
+            # Also save to S3
+            try:
+                org_id = str(project.organization_id) if project.organization_id else 'default'
+                report_storage.save_analysis_section(
+                    project_id=str(project.id),
+                    org_id=org_id,
+                    version=report.current_version + 1,
+                    section_type=section_data['section_type'],
+                    content=section_data['content'],
+                    report_type='quick_report'
+                )
+            except Exception as e:
+                logger.warning(f"S3 save failed for section {section_data['section_type']}: {e}")
+        
+        # Create simple HTML content for legacy support
+        html_content = f"<h1>Quick Market Research Report</h1>"
+        html_content += f"<h2>{inputs_dict.get('startup_name', 'Startup')}</h2>"
+        html_content += f"<div class='report-content'>{report_content}</div>"
+        
+        # Finalize report
+        report.current_version += 1
+        ReportVersion.objects.create(
+            report=report,
+            version_number=report.current_version,
+            html_content=html_content,
+            data_snapshot={'sections_count': len(sections)},
+            changes_summary=f"AI-generated market research with {len(sections)} sections",
+            generated_by=user
+        )
+        
+        report.status = 'completed'
+        report.progress = 100
+        report.current_step = 'Complete!'
+        report.html_content = html_content
+        report.completed_at = timezone.now()
+        report.save()
+        
+        # Save report metadata to S3
+        try:
+            org_id = str(project.organization_id) if project.organization_id else 'default'
+            report_storage.save_report_metadata(
+                project_id=str(project.id),
+                org_id=org_id,
+                version=report.current_version,
+                metadata={
+                    'report_id': str(report.id),
+                    'project_id': str(project.id),
+                    'org_id': org_id,
+                    'startup_name': inputs_dict.get('startup_name'),
+                    'sections_count': len(sections),
+                    'generated_at': report.completed_at.isoformat() if report.completed_at else None,
+                    'version': report.current_version,
+                    'status': 'success'
+                },
+                report_type='quick_report'
+            )
+            logger.info(f"✅ Saved Quick Report metadata for project {project.id}")
+        except Exception as e:
+            logger.warning(f"Failed to save Quick Report metadata: {e}")
+        
+        tracker.complete_step('save', {'sections_saved': len(sections)})
+        
+        logger.info(f"✅ Quick Report generated for project {project.id} with {len(sections)} sections")
+        return {"status": "success", "sections": len(sections)}
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to generate Quick Report: {e}")
+        if report:
+            report.status = 'failed'
+            report.error_message = str(e)
+            report.save()
+            if tracker:
+                from .models import ReportProgressStep
+                running_step = ReportProgressStep.objects.filter(
+                    report=report, status='running'
+                ).first()
+                if running_step:
+                    tracker.fail_step(running_step.step_key, str(e))
+        raise
+

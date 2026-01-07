@@ -1,6 +1,5 @@
 """
-Crunchbase Analysis Prompts - Ported from MVP.
-Contains the exact AI prompts for 13-step analysis pipeline.
+Crunchbase Analysis Prompts - Re-engineered for 3-Part Pipeline.
 """
 import json
 from typing import List, Dict, Any, Optional
@@ -25,427 +24,197 @@ class CrunchbasePromptTemplates:
 The user is interested in: {self.target_market_description}
 
 All analysis should be contextualized to how these companies relate to and overlap with this target market focus.
-
 """
         return ""
     
     # =========================================================================
-    # STEP 1: Company Overview
+    # PART 1: The Deep Dive (Per Company)
     # =========================================================================
-    
-    def generate_company_overview(self, companies: List[Dict[str, Any]]) -> str:
-        """
-        Generate prompt for company overview (Step 1).
-        
-        Persona: Neutral analyst
-        Purpose: Create a quick, high-level summary of the top companies.
-        """
-        company_data_for_prompt = [
-            {
-                "company_name": c.get("Company Name", c.get("name", "Unknown")),
-                "data": c
-            }
-            for c in companies
-        ]
-        
-        company_count_context = f"This analysis covers {len(companies)} companies.\n\n"
-        target_context = self._get_target_market_context()
-        
-        return f"""{company_count_context}{target_context}Analyze the following data for the top companies. For each company:
-1. Provide its name
-2. A concise, one-sentence summary of its business
-3. How it relates to and overlaps with the user's target market
 
-Format the output as a Markdown bulleted list. Do not add any introductory text, titles, or concluding remarks. Just the list.
-
-Data:
-{json.dumps(company_data_for_prompt, indent=2)}"""
-    
-    # =========================================================================
-    # STEP 2: Technology & Product Analysis (Per Company)
-    # =========================================================================
-    
-    def generate_tech_product_report(self, company: Dict[str, Any]) -> str:
+    def generate_company_summary(self, company: Dict[str, Any]) -> str:
         """
-        Generate prompt for Technology & Product Analysis (Individual Company).
-        
-        Persona: Seasoned Chief Technology Officer (CTO)
-        Focus: Product viability and technical foundation
+        Generate the 7-section Deep Dive report for a single company.
+        Combines all previous individual steps into one cohesive analysis.
         """
         target_context = self._get_target_market_context()
         company_name = company.get("Company Name", company.get("name", "Unknown"))
         
-        return f"""You are a seasoned Chief Technology Officer (CTO) evaluating the company for a potential acquisition. You care about product viability and technical foundation, not marketing fluff. Your tone is direct, technical, and focused on engineering excellence.
-Analyze the technology and product aspects of the following company based on the provided data. Your analysis should be a deep-dive, providing a comprehensive report focusing ONLY on technology and product metrics.
+        return f"""
+You are a top-tier Venture Capital Analyst preparing a Deep Dive Investment Memo.
+Your goal is to dissect this company with surgical precision. No marketing fluff.
 {target_context}
-STRUCTURE REQUIREMENT:
-The report must follow this exact section order:
 
-## Overview
-## Market Relevance
-## Technology & Product Metrics
-## Key Technical Strengths
-## Key Technical Weaknesses
-## Final Verdict
-
-All sections must appear even when data is missing. If data is unavailable for a section, explicitly say so.
-
-**METRICS RESTRICTION:** This section focuses ONLY on technology and product metrics. Analyze: About/description, Industry Tags, Active Tech Count, Tech Details summary, Total Products Active. DO NOT analyze funding, growth scores, or web traffic here - those belong in other sections.
-
-Always specify which exact field is missing (e.g., 'Monthly Visits', 'Total Funding Amount', 'Investors Table', 'Employee Profiles count', 'Tech Details summary') rather than just writing "N/A" multiple times without context.
-
-Do not mention the data is limited or that you are using proxies. Present your analysis with conviction.
-Output the entire report in Markdown format, using headings and bullet points for clarity.
-
+### INPUT DATA:
 Company: {company_name}
-Data:
-{json.dumps(company, indent=2)}"""
-    
+Data: {json.dumps(company, indent=2)}
+
+### OUTPUT:
+Generate a **comprehensive 7-section report** in Markdown.
+You MUST output all 7 sections below. If data is missing for a section, explicitly state what is missing and provide a qualitative assessment based on what IS available (e.g., "Seed stage company, no traffic data yet").
+
+#### SECTION 1: EXECUTIVE SUMMARY
+*   **Persona:** The Partner who has 30 seconds.
+*   **Task:** One paragraph summary of what they do, their key differentiator, and their threat level to the target market.
+
+#### SECTION 2: TECHNOLOGY & PRODUCT CORE
+*   **Persona:** Application Architect / CTO.
+*   **Focus:** Technical complexity and "Moat".
+*   **Task:** Analyze `Active Tech Count`, `Tech Details summary`, and `Total Products Active`.
+    *   Assess the sophistication of their stack (e.g., AI/ML, Cloud Infrastructure, Security).
+    *   Identify key technical strengths (e.g., "Proprietary Data Pipeline") and weaknesses (e.g., "Low tech count suggests manual processes").
+    *   *Constraint:* Do not analyze funding here. Focus only on product/tech.
+
+#### SECTION 3: MARKET TRACTION & DEMAND
+*   **Persona:** Data-Driven Market Research Analyst.
+*   **Focus:** Quantifying traction.
+*   **Task:** Analyze `Monthly Visits`, `Bounce Rate`, `Visit Duration`, `Global Traffic Rank`, and their growth percentages.
+    *   **Create a Markdown Table** summarizing these metrics.
+    *   Interpret the data: Is the audience growing? Is engagement high (low bounce, high duration)? What does this signal about product-market fit?
+    *   *Constraint:* If web data is missing, skip the table and provide a qualitative assessment based on brand presence (e.g., App downloads, social footprint).
+
+#### SECTION 4: FUNDING & FINANCIAL HEALTH
+*   **Persona:** Skeptical Venture Capital Analyst.
+*   **Focus:** Financial soundness and capital efficiency.
+*   **Task:** Analyze `Total Funding Amount`, `Investors Table`, and `Number of Funding Rounds`.
+    *   **Create a Markdown Table** summarizing the key funding rounds (Date, Amount, Lead Investor) IF data exists.
+    *   Analyze the investor quality (Top tier VCs vs. unknown).
+    *   Assess capital efficiency: Are they achieving high traffic/growth relative to their funding?
+
+#### SECTION 5: GROWTH & COMPETITIVE POSITIONING
+*   **Persona:** Discerning Growth Equity Investor.
+*   **Focus:** Scalable growth signals.
+*   **Task:** Analyze `Growth Score`, `Growth Prediction`, `Headcount`, and `Contacts count`.
+    *   Are they hiring aggressively? Is the growth score trending up?
+    *   Compare them to the "Market Navigator" concept. Are they a massive incumbent or a nimble challenger?
+
+#### SECTION 6: STRATEGIC SWOT
+*   **Persona:** Senior Partner at a Consulting Firm.
+*   **Task:** Synthesize all above insights into a strategic SWOT.
+    *   **Strengths:** Internal attributes (Tech, Funding, Talent).
+    *   **Weaknesses:** Internal liabilities (High bounce rate, technical debt, lack of transparency).
+    *   **Opportunities:** External chances for *Market Navigator* to capitalize on (e.g., "Partner with them for data").
+    *   **Threats:** External risks they pose to *Market Navigator* (e.g., "They own the mobile intelligence niche").
+
+#### SECTION 7: FINAL VERDICT
+*   **Actionable Takeaway:** One bold paragraph. Should Market Navigator fear them, copy them, or ignore them?
+"""
+
     # =========================================================================
-    # STEP 3: Market Demand & Web Insights (Per Company)
+    # PART 2: The Strategic Summary (Topic-Centric Analysis)
     # =========================================================================
-    
-    def generate_market_demand_report(self, company: Dict[str, Any]) -> str:
+
+    def generate_strategic_summary(self, companies: List[Dict[str, Any]]) -> str:
         """
-        Generate prompt for Market Demand & Web Insights (Individual Company).
-        
-        Persona: Data-driven Market Research Analyst
-        Focus: Market traction and demand quantification
+        Generate a trend analysis across the top companies.
+        Synthesizes the specific "Summary" prompts into one document.
         """
         target_context = self._get_target_market_context()
-        company_name = company.get("Company Name", company.get("name", "Unknown"))
         
-        return f"""You are a data-driven Market Research Analyst. Your focus is quantifying market traction and demand. You are allergic to vague statements and demand precision in your metrics.
-Analyze the market demand and web insights of the following company based on the provided data. Your analysis should be a deep-dive, providing a comprehensive report focusing ONLY on market demand and web traffic metrics.
+        # Prepare data summary to avoid token limits
+        summary_data = []
+        for i, c in enumerate(companies):
+            summary_data.append({
+                "rank": i + 1,
+                "name": c.get("Company Name", c.get("name")),
+                "funding": c.get("Total Funding Amount"),
+                "visits": c.get("Monthly Visits"),
+                "growth_score": c.get("Growth Score"),
+                "tech_count": c.get("Active Tech Count"),
+                "industry_tags": c.get("Industry Tags", [])
+            })
+
+        return f"""
+You are writing **Part 2: Strategic Summary** (Executive Report).
+This section synthesizes trends across the Top {len(companies)} companies to guide Market Navigator's strategy.
 {target_context}
-STRUCTURE REQUIREMENT:
-The report must follow this exact section order:
 
-## Overview
-## Market Relevance
-## Market Demand & Web Metrics
-## Key Demand Strengths
-## Key Demand Weaknesses
-## Final Verdict
+### INPUT DATA (Top {len(companies)}):
+{json.dumps(summary_data, indent=2)}
 
-All sections must appear even when data is missing. If data is unavailable for a section, explicitly say so.
+### OUTPUT STRUCTURE & REQUIREMENTS:
 
-**METRICS RESTRICTION:** This section focuses ONLY on market demand and web traffic metrics. Analyze: Monthly Visits, Monthly Visits Growth, Global Traffic Rank, Monthly Rank Growth, Bounce Rate, Bounce Rate Growth, Page Views / Visit, Page Views / Visit Growth, Visit Duration, Visit Duration Growth. DO NOT analyze funding, growth scores, or technology metrics here - those belong in other sections.
+**1. EXECUTIVE MARKET MAP**
+*   Create a categorization framework. Group the companies into logical buckets (e.g., "Direct Competitors," "Data Utilities," "Enterprise Legacy").
+*   Present this as a **Markdown Table**: | Category | Companies | Threat Level |
+*   Analyze the market density. Is it crowded with direct competitors, or fragmented?
 
-Always specify which exact field is missing (e.g., 'Monthly Visits', 'Total Funding Amount', 'Investors Table', 'Employee Profiles count', 'Tech Details summary') rather than just writing "N/A" multiple times without context.
+**2. TECHNOLOGY LANDSCAPE (The CTO View)**
+*   Synthesize technical trends. Are the top players relying on proprietary AI, or standard aggregators?
+*   Analyze "Active Tech Counts". Does technical complexity correlate with market dominance in this sample?
+*   Identify the "Table Stakes" features that Market Navigator *must* build to compete.
 
-Do not mention the data is limited or that you are using proxies. Present your analysis with conviction.
-Output the entire report in Markdown format, using headings and bullet points for clarity.
+**3. CAPITAL & TRACTION DYNAMICS (The VC View)**
+*   Analyze the relationship between Funding and Traffic.
+*   Identify **Capital Efficient Outliers:** Who is getting high traffic with low/no funding? (These are models to emulate).
+*   Identify **Capital Inefficient Incumbents:** Who has raised millions but has low engagement? (These are vulnerable).
 
-Company: {company_name}
-Data:
-{json.dumps(company, indent=2)}"""
-    
+**4. GROWTH VECTORS & GAPS (The Strategist View)**
+*   Where is the "Blue Ocean"? Look at the "Industry Tags" and descriptions. What specific niches are underserved by these players?
+*   Discuss the "Real-time" aspect. How many actually offer *real-time* insights vs. static reports?
+
+**5. STRATEGIC RECOMMENDATION FOR MARKET NAVIGATOR**
+*   Based on these profiles, define the optimal entry point.
+*   Should Market Navigator be a low-cost disruptor, a premium AI-first tool, or a vertical specialist?
+"""
+
     # =========================================================================
-    # STEP 4: Competitor Identification (Per Company)
+    # PART 3: The Fast Analysis (Board-Level Dashboard)
     # =========================================================================
-    
-    def generate_competitor_report(self, company: Dict[str, Any]) -> str:
+
+    def generate_fast_analysis(self, companies: List[Dict[str, Any]]) -> str:
         """
-        Generate prompt for Competitor Identification (Individual Company).
-        
-        Persona: Ruthless Competitive Intelligence Strategist
-        Focus: Mapping the competitive battlefield
+        Generate a "Flash Report" for executive decision making.
+        Focuses purely on high-signal data tables and direct "Buy/Build/Partner" calls.
         """
         target_context = self._get_target_market_context()
-        company_name = company.get("Company Name", company.get("name", "Unknown"))
         
-        return f"""You are a ruthless Competitive Intelligence Strategist from a top-tier firm. Your job is to map the battlefield and identify threats. No sugar-coating. Your analysis cuts through the noise to reveal the true competitive landscape.
-Analyze the competitive positioning of the following company based on the provided data. Your analysis should be a deep-dive, providing a comprehensive report focusing ONLY on competitive intelligence and positioning metrics.
+        # Dashboard data preparation
+        dashboard_data = []
+        for i, c in enumerate(companies):
+            dashboard_data.append({
+                "rank": i + 1,
+                "name": c.get("Company Name", c.get("name")),
+                "funding": c.get("Total Funding Amount"),
+                "traffic": c.get("Monthly Visits"),
+                "growth": c.get("Growth Score"),
+                "tags": c.get("Industry Tags", [])[:3]
+            })
+
+        return f"""
+You are writing **Part 3: Fast Analysis** (Flash Report).
+This document is for the Board of Directors who have 5 minutes to read.
+**Constraint:** Be ruthless. No fluff. Use tables and bullet points only.
 {target_context}
-STRUCTURE REQUIREMENT:
-The report must follow this exact section order:
 
-## Overview
-## Market Relevance
-## Competitive Metrics & Positioning
-## Key Competitive Strengths
-## Key Competitive Weaknesses
-## Final Verdict
+### INPUT DATA:
+{json.dumps(dashboard_data, indent=2)}
 
-All sections must appear even when data is missing. If data is unavailable for a section, explicitly say so.
+### OUTPUT REQUIREMENTS:
 
-**METRICS RESTRICTION:** This section focuses ONLY on competitive intelligence metrics. Analyze: Growth Score, Growth Score update date, Growth Prediction, Growth Prediction update date, IPO Prediction, Acquisition Prediction. DO NOT analyze funding, web traffic, or technology metrics here - those belong in other sections.
+**1. THE COMPETITIVE LANDSCAPE AT A GLANCE**
+*   Create a single **Master Comparison Table** with the following columns:
+    *   **Rank**
+    *   **Company**
+    *   **Core Focus** (3 words max)
+    *   **Funding**
+    *   **Web Visits**
+    *   **Growth Score**
+    *   **Threat Status** (High/Med/Low)
 
-Always specify which exact field is missing (e.g., 'Monthly Visits', 'Total Funding Amount', 'Investors Table', 'Employee Profiles count', 'Tech Details summary') rather than just writing "N/A" multiple times without context.
+**2. CRITICAL THREATS (Red Flags)**
+*   Identify the top 1-2 companies that could kill Market Navigator.
+*   **Why?** (1 sentence).
+*   **Mitigation Strategy:** (1 sentence).
 
-Do not mention the data is limited or that you are using proxies. Present your analysis with conviction.
-Output the entire report in Markdown format, using headings and bullet points for clarity.
+**3. GOLDEN OPPORTUNITIES (Green Flags)**
+*   Identify 1-2 companies that represent a massive opportunity (e.g., to acquire, to partner with, or a gap they are leaving open).
+*   **Why?** (1 sentence).
 
-Company: {company_name}
-Data:
-{json.dumps(company, indent=2)}"""
-    
-    # =========================================================================
-    # STEP 5: Market & Funding Insights (Per Company)
-    # =========================================================================
-    
-    def generate_market_funding_report(self, company: Dict[str, Any]) -> str:
-        """
-        Generate prompt for Market & Funding Insights (Individual Company).
-        
-        Persona: Sharp, skeptical Venture Capital Analyst
-        Focus: Financial soundness and capital efficiency
-        """
-        target_context = self._get_target_market_context()
-        company_name = company.get("Company Name", company.get("name", "Unknown"))
-        
-        return f"""You are a sharp, skeptical Venture Capital Analyst. You're looking for signs of a financially sound, high-growth business. Every dollar must be justified. Your analysis is forward-looking and focused on capital efficiency and market positioning.
-Analyze the market and funding insights of the following company based on the provided data. Your analysis should be a deep-dive, providing a comprehensive report focusing ONLY on market positioning and funding metrics.
-{target_context}
-STRUCTURE REQUIREMENT:
-The report must follow this exact section order:
+**4. BUILD vs. BUY vs. PARTNER**
+*   **BUILD:** List 3 features seen in these competitors that Market Navigator MUST build internally to survive.
+*   **PARTNER:** List 1-2 types of companies (or specific names from the list) where partnering for data makes more sense than building.
+*   **IGNORE:** List companies that look big but are actually irrelevant to Market Navigator's startup focus.
 
-## Overview
-## Market Relevance
-## Market & Funding Metrics
-## Key Market Strengths
-## Key Market Weaknesses
-## Final Verdict
-
-All sections must appear even when data is missing. If data is unavailable for a section, explicitly say so.
-
-**METRICS RESTRICTION:** This section focuses ONLY on market positioning and funding metrics. Analyze: Total Funding Amount, Number of Funding Rounds, Number of Investors, Number of Lead Investors, Investors Table, Funding Table, Funding Prediction. DO NOT analyze growth scores, web traffic, or technology metrics here - those belong in other sections.
-
-Always specify which exact field is missing (e.g., 'Monthly Visits', 'Total Funding Amount', 'Investors Table', 'Employee Profiles count', 'Tech Details summary') rather than just writing "N/A" multiple times without context.
-
-Do not mention the data is limited or that you are using proxies. Present your analysis with conviction.
-Output the entire report in Markdown format, using headings and bullet points for clarity.
-
-Company: {company_name}
-Data:
-{json.dumps(company, indent=2)}"""
-    
-    # =========================================================================
-    # STEP 6: Growth Potential (Per Company)
-    # =========================================================================
-    
-    def generate_growth_potential_report(self, company: Dict[str, Any]) -> str:
-        """
-        Generate prompt for Growth Potential (Individual Company).
-        
-        Persona: Discerning Growth Equity Investor
-        Focus: Scalable growth signals and competitive differentiation
-        """
-        target_context = self._get_target_market_context()
-        company_name = company.get("Company Name", company.get("name", "Unknown"))
-        
-        return f"""You are a discerning Growth Equity Investor looking for the next unicorn. You are focused on scalable growth signals and competitive differentiation. Your analysis identifies true growth potential versus hype.
-Analyze the growth potential of the following company based on the provided data. Your analysis should be a deep-dive, providing a comprehensive report focusing ONLY on growth and expansion metrics.
-{target_context}
-STRUCTURE REQUIREMENT:
-The report must follow this exact section order:
-
-## Overview
-## Market Relevance
-## Growth & Expansion Metrics
-## Key Growth Strengths
-## Key Growth Weaknesses
-## Final Verdict
-
-All sections must appear even when data is missing. If data is unavailable for a section, explicitly say so.
-
-**METRICS RESTRICTION:** This section focuses ONLY on growth and expansion metrics. Analyze: Headcount, Employee Profiles count, Contacts count, Current Employees Table, Growth Insight. DO NOT analyze funding, web traffic, or technology metrics here - those belong in other sections.
-
-Always specify which exact field is missing (e.g., 'Monthly Visits', 'Total Funding Amount', 'Investors Table', 'Employee Profiles count', 'Tech Details summary') rather than just writing "N/A" multiple times without context.
-
-Do not mention the data is limited or that you are using proxies. Present your analysis with conviction.
-Output the entire report in Markdown format, using headings and bullet points for clarity.
-
-Company: {company_name}
-Data:
-{json.dumps(company, indent=2)}"""
-    
-    # =========================================================================
-    # STEP 7: SWOT Analysis (Per Company)
-    # =========================================================================
-    
-    def generate_swot_report(self, company: Dict[str, Any]) -> str:
-        """
-        Generate prompt for SWOT Analysis (Individual Company).
-        
-        Persona: Senior partner at top-tier consulting firm
-        Focus: Strategic analysis for investors and executives
-        """
-        target_context = self._get_target_market_context()
-        company_name = company.get("Company Name", company.get("name", "Unknown"))
-        
-        return f"""You are a senior partner at a top-tier consulting firm, specializing in strategic analysis. Your SWOT is a weapon for investors and executives. Be direct, concise, and focus on high-impact factors.
-Conduct a comprehensive SWOT analysis for the following company based on the provided data. Your analysis should synthesize insights from all available metrics to provide a balanced strategic assessment.
-{target_context}
-STRUCTURE REQUIREMENT:
-The report must follow this exact section order:
-
-## Overview
-## Market Relevance
-## Strengths
-## Weaknesses
-## Opportunities
-## Threats
-## Final Strategic Verdict
-
-All sections must appear even when data is missing. If data is unavailable for a section, explicitly say so.
-
-Always specify which exact field is missing (e.g., 'Monthly Visits', 'Total Funding Amount', 'Investors Table', 'Employee Profiles count', 'Tech Details summary') rather than just writing "N/A" multiple times without context.
-
-Do not mention the data is limited or that you are using proxies. Present your analysis with conviction.
-Output the entire report in Markdown format, using headings and bullet points for clarity.
-
-Company: {company_name}
-Data:
-{json.dumps(company, indent=2)}"""
-    
-    # =========================================================================
-    # STEP 8: Technology & Product Summary
-    # =========================================================================
-    
-    def generate_tech_product_summary(self, reports: List[str], sample_size: int) -> str:
-        """Generate executive summary for Technology & Product category."""
-        target_context = self._get_target_market_context()
-        reports_text = "\n\n---\n\n".join([f"Report {i+1}:\n{report}" for i, report in enumerate(reports)])
-        
-        return f"""You are a senior partner at a top-tier consulting firm, synthesizing field reports into a high-level executive summary for a board of directors. Your summary must be strategic, insightful, and concise.
-{target_context}Based ONLY on the following individual company reports, generate a cohesive summary for Technology & Product Analysis.
-Your task is to identify sample-based trends, patterns, common strengths or weaknesses, and significant outliers based strictly on the companies included in these reports.
-
-IMPORTANT: This analysis covers {sample_size} companies. Mention this sample size ONCE at the beginning of your summary, then refer to it simply as "the sample" or "these companies" throughout. DO NOT repeat "N={sample_size}" or "sample of {sample_size} companies" in every sentence or heading.
-
-Always clarify that these insights reflect only the analyzed sample, not the entire market.
-Do not extrapolate beyond the provided data or reference total market size unless explicitly provided in the reports.
-
-**Individual Company Reports:**
-{reports_text}
-
----
-**Your Executive Summary for Technology & Product Analysis:**
-(Output in Markdown format)"""
-    
-    # =========================================================================
-    # STEP 9: Market Demand Summary
-    # =========================================================================
-    
-    def generate_market_demand_summary(self, reports: List[str], sample_size: int) -> str:
-        """Generate executive summary for Market Demand & Web Insights category."""
-        target_context = self._get_target_market_context()
-        reports_text = "\n\n---\n\n".join([f"Report {i+1}:\n{report}" for i, report in enumerate(reports)])
-        
-        return f"""You are a senior partner at a top-tier consulting firm, synthesizing field reports into a high-level executive summary for a board of directors. Your summary must be strategic, insightful, and concise.
-{target_context}Based ONLY on the following individual company reports, generate a cohesive summary for Market Demand & Web Insights.
-Your task is to identify sample-based trends, patterns, common strengths or weaknesses, and significant outliers based strictly on the companies included in these reports.
-
-IMPORTANT: This analysis covers {sample_size} companies. Mention this sample size ONCE at the beginning of your summary, then refer to it simply as "the sample" or "these companies" throughout. DO NOT repeat "N={sample_size}" or "sample of {sample_size} companies" in every sentence or heading.
-
-Always clarify that these insights reflect only the analyzed sample, not the entire market.
-Do not extrapolate beyond the provided data or reference total market size unless explicitly provided in the reports.
-
-**Individual Company Reports:**
-{reports_text}
-
----
-**Your Executive Summary for Market Demand & Web Insights:**
-(Output in Markdown format)"""
-    
-    # =========================================================================
-    # STEP 10: Competitor Summary
-    # =========================================================================
-    
-    def generate_competitor_summary(self, reports: List[str], sample_size: int) -> str:
-        """Generate executive summary for Competitor Identification category."""
-        target_context = self._get_target_market_context()
-        reports_text = "\n\n---\n\n".join([f"Report {i+1}:\n{report}" for i, report in enumerate(reports)])
-        
-        return f"""You are a senior partner at a top-tier consulting firm, synthesizing field reports into a high-level executive summary for a board of directors. Your summary must be strategic, insightful, and concise.
-{target_context}Based ONLY on the following individual company reports, generate a cohesive summary for Competitor Identification.
-Your task is to identify sample-based trends, patterns, common strengths or weaknesses, and significant outliers based strictly on the companies included in these reports.
-
-IMPORTANT: This analysis covers {sample_size} companies. Mention this sample size ONCE at the beginning of your summary, then refer to it simply as "the sample" or "these companies" throughout. DO NOT repeat "N={sample_size}" or "sample of {sample_size} companies" in every sentence or heading.
-
-Always clarify that these insights reflect only the analyzed sample, not the entire market.
-Do not extrapolate beyond the provided data or reference total market size unless explicitly provided in the reports.
-
-**Individual Company Reports:**
-{reports_text}
-
----
-**Your Executive Summary for Competitor Identification:**
-(Output in Markdown format)"""
-    
-    # =========================================================================
-    # STEP 11: Market & Funding Summary
-    # =========================================================================
-    
-    def generate_market_funding_summary(self, reports: List[str], sample_size: int) -> str:
-        """Generate executive summary for Market & Funding Insights category."""
-        target_context = self._get_target_market_context()
-        reports_text = "\n\n---\n\n".join([f"Report {i+1}:\n{report}" for i, report in enumerate(reports)])
-        
-        return f"""You are a senior partner at a top-tier consulting firm, synthesizing field reports into a high-level executive summary for a board of directors. Your summary must be strategic, insightful, and concise.
-{target_context}Based ONLY on the following individual company reports, generate a cohesive summary for Market & Funding Insights.
-Your task is to identify sample-based trends, patterns, common strengths or weaknesses, and significant outliers based strictly on the companies included in these reports.
-
-IMPORTANT: This analysis covers {sample_size} companies. Mention this sample size ONCE at the beginning of your summary, then refer to it simply as "the sample" or "these companies" throughout. DO NOT repeat "N={sample_size}" or "sample of {sample_size} companies" in every sentence or heading.
-
-Always clarify that these insights reflect only the analyzed sample, not the entire market.
-Do not extrapolate beyond the provided data or reference total market size unless explicitly provided in the reports.
-
-**Individual Company Reports:**
-{reports_text}
-
----
-**Your Executive Summary for Market & Funding Insights:**
-(Output in Markdown format)"""
-    
-    # =========================================================================
-    # STEP 12: Growth Potential Summary
-    # =========================================================================
-    
-    def generate_growth_potential_summary(self, reports: List[str], sample_size: int) -> str:
-        """Generate executive summary for Growth Potential category."""
-        target_context = self._get_target_market_context()
-        reports_text = "\n\n---\n\n".join([f"Report {i+1}:\n{report}" for i, report in enumerate(reports)])
-        
-        return f"""You are a senior partner at a top-tier consulting firm, synthesizing field reports into a high-level executive summary for a board of directors. Your summary must be strategic, insightful, and concise.
-{target_context}Based ONLY on the following individual company reports, generate a cohesive summary for Growth Potential.
-Your task is to identify sample-based trends, patterns, common strengths or weaknesses, and significant outliers based strictly on the companies included in these reports.
-
-IMPORTANT: This analysis covers {sample_size} companies. Mention this sample size ONCE at the beginning of your summary, then refer to it simply as "the sample" or "these companies" throughout. DO NOT repeat "N={sample_size}" or "sample of {sample_size} companies" in every sentence or heading.
-
-Always clarify that these insights reflect only the analyzed sample, not the entire market.
-Do not extrapolate beyond the provided data or reference total market size unless explicitly provided in the reports.
-
-**Individual Company Reports:**
-{reports_text}
-
----
-**Your Executive Summary for Growth Potential:**
-(Output in Markdown format)"""
-    
-    # =========================================================================
-    # STEP 13: SWOT Summary
-    # =========================================================================
-    
-    def generate_swot_summary(self, reports: List[str], sample_size: int) -> str:
-        """Generate executive summary for SWOT Analysis category."""
-        target_context = self._get_target_market_context()
-        reports_text = "\n\n---\n\n".join([f"Report {i+1}:\n{report}" for i, report in enumerate(reports)])
-        
-        return f"""You are a senior partner at a top-tier consulting firm, synthesizing field reports into a high-level executive summary for a board of directors. Your summary must be strategic, insightful, and concise.
-{target_context}Based ONLY on the following individual company reports, generate a cohesive summary for SWOT Analysis.
-Your task is to identify sample-based trends, patterns, common strengths or weaknesses, and significant outliers based strictly on the companies included in these reports.
-
-IMPORTANT: This analysis covers {sample_size} companies. Mention this sample size ONCE at the beginning of your summary, then refer to it simply as "the sample" or "these companies" throughout. DO NOT repeat "N={sample_size}" or "sample of {sample_size} companies" in every sentence or heading.
-
-Always clarify that these insights reflect only the analyzed sample, not the entire market.
-Do not extrapolate beyond the provided data or reference total market size unless explicitly provided in the reports.
-
-**Individual Company Reports:**
-{reports_text}
-
----
-**Your Executive Summary for SWOT Analysis:**
-(Output in Markdown format)"""
+**5. FINAL GO/NO-GO SIGNAL**
+*   One sentence: Is the market too crowded, or is the timing perfect?
+"""

@@ -5,6 +5,7 @@ import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import TopBar from "@/components/TopBar";
+import ExpandableText from "@/components/ExpandableText";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000";
@@ -103,6 +104,7 @@ interface ChatMode {
 }
 
 const REPORT_TYPES = [
+    { type: "quick_report", label: "Quick Report", icon: "⚡", description: "AI-powered market research report" },
     { type: "crunchbase", label: "Crunchbase Analysis", icon: "🔍", description: "Competitor intelligence and funding data" },
     { type: "tracxn", label: "Tracxn Insights", icon: "📊", description: "Startup landscape and market trends" },
     { type: "social", label: "Social Analysis", icon: "📱", description: "Brand mentions and social sentiment" },
@@ -117,6 +119,7 @@ const INPUT_FIELDS = [
     { key: "business_model", label: "Business Model", placeholder: "How do you make money?" },
     { key: "geographic_focus", label: "Geographic Focus", placeholder: "Target regions" },
     { key: "research_goal", label: "Research Goal", placeholder: "What do you want to learn?", multiline: true },
+    { key: "time_range", label: "Time Range", placeholder: "e.g., Last 5 years, 2020-2024" },
     { key: "inspiration_sources", label: "Competitors", placeholder: "Stripe, Square, etc." },
 ];
 
@@ -170,6 +173,7 @@ export default function ProjectPage() {
     const [collapsedSteps, setCollapsedSteps] = useState<Record<string, boolean>>({});
 
     const wsRef = useRef<WebSocket | null>(null);
+    const wsReconnectAttempts = useRef<number>(0);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -304,7 +308,22 @@ export default function ProjectPage() {
     };
 
     const connectWebSocket = () => {
+        // Close existing connection if any
+        if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+            wsRef.current.close();
+        }
+
         const ws = new WebSocket(`${WS_URL}/ws/projects/${projectId}/chat/?token=${token}`);
+        const maxReconnectAttempts = 10;
+        const baseDelay = 1000; // 1 second
+
+        ws.onopen = () => {
+            console.log('🔌 WebSocket connected');
+            wsReconnectAttempts.current = 0; // Reset on successful connection
+            // Refresh data when reconnected to ensure UI is up to date
+            fetchProjectData();
+        };
+
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
             if (data.type === "history") {
@@ -321,8 +340,54 @@ export default function ProjectPage() {
                 handleAutoFill(data.field, data.value, data.confidence);
             }
         };
+
+        ws.onerror = (error) => {
+            console.error('❌ WebSocket error:', error);
+        };
+
+        ws.onclose = (event) => {
+            console.log('🔌 WebSocket closed:', event.code, event.reason);
+
+            // Don't reconnect if closed intentionally (code 1000) or auth issues
+            if (event.code === 1000 || event.code === 4001) {
+                return;
+            }
+
+            // Auto-reconnect with exponential backoff
+            if (wsReconnectAttempts.current < maxReconnectAttempts) {
+                wsReconnectAttempts.current++;
+                const delay = Math.min(baseDelay * Math.pow(2, wsReconnectAttempts.current - 1), 30000); // Max 30s
+                console.log(`⏳ Reconnecting in ${delay}ms (attempt ${wsReconnectAttempts.current}/${maxReconnectAttempts})...`);
+                setTimeout(() => {
+                    if (token && projectId) {
+                        connectWebSocket();
+                    }
+                }, delay);
+            } else {
+                console.error('❌ Max reconnection attempts reached');
+            }
+        };
+
         wsRef.current = ws;
     };
+
+    // Handle page visibility changes - refresh data when tab becomes visible again
+    useEffect(() => {
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible' && token && projectId) {
+                console.log('👁️ Page became visible, refreshing data...');
+                fetchProjectData();
+                // Reconnect WebSocket if it was closed
+                if (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED) {
+                    wsReconnectAttempts.current = 0;
+                    connectWebSocket();
+                }
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    }, [token, projectId]);
 
     // Handle auto-fill from AI
     const handleAutoFill = (field: string, value: string, confidence: number) => {
@@ -1186,9 +1251,22 @@ export default function ProjectPage() {
                                                                                                                 </div>
                                                                                                             </div>
                                                                                                         ) : detail.type === 'search_result' ? (
-                                                                                                            <div>
-                                                                                                                <span style={{ color: "var(--color-success)" }}>🔍</span>
-                                                                                                                <span style={{ marginLeft: "6px" }}>{detail.message}</span>
+                                                                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                                                                                                <div>
+                                                                                                                    <span style={{ color: "var(--color-success)" }}>🔍</span>
+                                                                                                                    <span style={{ marginLeft: "6px" }}>{detail.message.split(' - Top:')[0]}</span>
+                                                                                                                </div>
+                                                                                                                {detail.data?.full_text && (
+                                                                                                                    <div style={{ marginLeft: "24px", fontSize: "10px", color: "var(--color-text-secondary)" }}>
+                                                                                                                        <span style={{ fontWeight: 600 }}>Top Tweet:</span>{" "}
+                                                                                                                        <ExpandableText text={detail.data.full_text} maxLength={60} />
+                                                                                                                    </div>
+                                                                                                                )}
+                                                                                                                {!detail.data?.full_text && detail.message.includes('Top:') && (
+                                                                                                                    <div style={{ marginLeft: "24px", fontSize: "10px", color: "var(--color-text-secondary)" }}>
+                                                                                                                        {detail.message.split(' - Top:')[1]}
+                                                                                                                    </div>
+                                                                                                                )}
                                                                                                             </div>
                                                                                                         ) : detail.type === 'company_rank' ? (
                                                                                                             /* Sorted company with numbered list, inline description that expands on click */
@@ -1209,24 +1287,9 @@ export default function ProjectPage() {
                                                                                                                             (CB Rank: {detail.data?.cb_rank || 'N/A'})
                                                                                                                         </span>
                                                                                                                         {" "}
-                                                                                                                        {desc && (
-                                                                                                                            <span style={{ fontSize: "10px", color: "var(--color-text-secondary)" }}>
-                                                                                                                                — {isLong ? (
-                                                                                                                                    <>
-                                                                                                                                        <details style={{ display: "inline" }} className="inline-expand">
-                                                                                                                                            <summary style={{ display: "inline", cursor: "pointer", listStyle: "none" }}>
-                                                                                                                                                <span className="truncated-text">{desc.slice(0, 60)}...</span>
-                                                                                                                                                <span className="full-text" style={{ display: "none" }}>{desc}</span>
-                                                                                                                                            </summary>
-                                                                                                                                        </details>
-                                                                                                                                        <style>{`
-                                                                                                                                            .inline-expand[open] .truncated-text { display: none !important; }
-                                                                                                                                            .inline-expand[open] .full-text { display: inline !important; }
-                                                                                                                                        `}</style>
-                                                                                                                                    </>
-                                                                                                                                ) : desc}
-                                                                                                                            </span>
-                                                                                                                        )}
+                                                                                                                        <span style={{ fontSize: "10px", color: "var(--color-text-secondary)" }}>
+                                                                                                                            — <ExpandableText text={desc} maxLength={60} />
+                                                                                                                        </span>
                                                                                                                     </div>
                                                                                                                 );
                                                                                                             })()
@@ -1304,12 +1367,8 @@ export default function ProjectPage() {
                                                                         <button
                                                                             onClick={(e) => {
                                                                                 e.stopPropagation();
-                                                                                // Open report HTML in new tab
-                                                                                const newWindow = window.open('', '_blank');
-                                                                                if (newWindow) {
-                                                                                    newWindow.document.write(report.html_content);
-                                                                                    newWindow.document.close();
-                                                                                }
+                                                                                // Navigate to report page
+                                                                                router.push(`/projects/${projectId}/reports/${report.id}`);
                                                                             }}
                                                                             style={{ padding: "4px 12px", background: "var(--color-primary)", border: "none", borderRadius: "var(--radius-sm)", color: "white", cursor: "pointer", fontSize: "11px", fontWeight: 500 }}
                                                                         >
@@ -1430,7 +1489,26 @@ export default function ProjectPage() {
                                                                                                         padding: "2px 0",
                                                                                                         borderBottom: dIdx < step.details.length - 1 ? "1px solid var(--color-border)" : "none"
                                                                                                     }}>
-                                                                                                        {detail.message}
+                                                                                                        {detail.type === 'search_result' ? (
+                                                                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                                                                                                <div>
+                                                                                                                    {detail.message.split(' - Top:')[0]}
+                                                                                                                </div>
+                                                                                                                {detail.data?.full_text && (
+                                                                                                                    <div style={{ marginLeft: "12px", fontSize: "9px", color: "var(--color-text-secondary)" }}>
+                                                                                                                        <span style={{ fontWeight: 600 }}>Top Tweet:</span>{" "}
+                                                                                                                        <ExpandableText text={detail.data.full_text} maxLength={60} />
+                                                                                                                    </div>
+                                                                                                                )}
+                                                                                                                {!detail.data?.full_text && detail.message.includes('Top:') && (
+                                                                                                                    <div style={{ marginLeft: "12px", fontSize: "9px", color: "var(--color-text-secondary)" }}>
+                                                                                                                        {detail.message.split(' - Top:')[1]}
+                                                                                                                    </div>
+                                                                                                                )}
+                                                                                                            </div>
+                                                                                                        ) : (
+                                                                                                            detail.message
+                                                                                                        )}
                                                                                                     </div>
                                                                                                 ))}
                                                                                             </div>

@@ -187,40 +187,50 @@ class ChatConsumer(AsyncWebsocketConsumer):
     def get_chat_history(self):
         """Get chat history for project."""
         from .models import ChatMessage
+        from django.db import connection
         
-        messages = ChatMessage.objects.filter(
-            project_id=self.project_id
-        ).order_by('created_at')[:100]
-        
-        return [
-            {
-                'id': str(m.id),
-                'message': m.message,
-                'is_bot': m.is_bot,
-                'user_id': str(m.user_id) if m.user_id else None,
-                'message_type': m.message_type,
-                'metadata': m.metadata,
-                'active_modes': m.active_modes,  # Include modes in history
-                'created_at': m.created_at.isoformat()
-            }
-            for m in messages
-        ]
+        try:
+            messages = ChatMessage.objects.filter(
+                project_id=self.project_id
+            ).order_by('created_at')[:100]
+            
+            return [
+                {
+                    'id': str(m.id),
+                    'message': m.message,
+                    'is_bot': m.is_bot,
+                    'user_id': str(m.user_id) if m.user_id else None,
+                    'message_type': m.message_type,
+                    'metadata': m.metadata,
+                    'active_modes': m.active_modes,  # Include modes in history
+                    'created_at': m.created_at.isoformat()
+                }
+                for m in messages
+            ]
+        finally:
+            # Explicitly close connection to return it to pool
+            connection.close()
     
     @database_sync_to_async
     def save_message(self, message, is_bot=False, message_type='text', metadata=None):
         """Save message to database."""
         from .models import ChatMessage
+        from django.db import connection
         
-        msg = ChatMessage.objects.create(
-            project_id=self.project_id,
-            user_id=None if is_bot else self.user.id,
-            message=message,
-            is_bot=is_bot,
-            message_type=message_type,
-            metadata=metadata or {}
-        )
-        
-        return {
-            'id': msg.id,
-            'created_at': msg.created_at.isoformat()
-        }
+        try:
+            msg = ChatMessage.objects.create(
+                project_id=self.project_id,
+                user_id=None if is_bot else self.user.id,
+                message=message,
+                is_bot=is_bot,
+                message_type=message_type,
+                metadata=metadata or {}
+            )
+            
+            return {
+                'id': msg.id,
+                'created_at': msg.created_at.isoformat()
+            }
+        finally:
+            # Explicitly close connection to return it to pool
+            connection.close()

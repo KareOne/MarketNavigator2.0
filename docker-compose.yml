@@ -1,6 +1,5 @@
-# MarketNavigator v2 - High-Scale Production Docker Compose
+# MarketNavigator v2 - Local Development Docker Compose
 # Includes Crunchbase and Tracxn scrapers
-# Per HIGH_SCALE_ARCHITECTURE_PLAN.md
 
 services:
   # ==========================================================================
@@ -52,40 +51,33 @@ services:
       /bin/sh -c " mc alias set myminio http://minio:9000 minioadmin minioadmin123; mc mb --ignore-existing myminio/marketnavigator-files; mc anonymous set download myminio/marketnavigator-files/public; exit 0; "
 
   # ==========================================================================
-  # Scraper APIs (Crunchbase + Tracxn)
-  # NOTE: These use REMOTE MySQL databases on Liara (configured in their .env files)
+  # API Orchestrator (task distribution to remote workers)
   # ==========================================================================
 
-  crunchbase_api:
-    build: ./scrapers/Crunchbase_API
-    container_name: mn2-crunchbase-api
-    command: sh -c "python api_handler.py"
+  orchestrator:
+    build: ./orchestrator
+    container_name: mn2-orchestrator
+    command: python -m uvicorn server:app --host 0.0.0.0 --port 8010
     volumes:
-      - ./scrapers/Crunchbase_API:/app
+      - ./orchestrator:/app
     ports:
-      - "8003:8003"
+      - "8010:8010"
     environment:
-      PYTHONWARNINGS: "ignore::FutureWarning"
-      PANDAS_FUTURE_NO_SILENT_DOWNCASTING: "True"
-      # Note: Credentials are loaded from scrapers/Crunchbase_API/.env file
-      # which contains remote Liara MySQL connection
+      - REDIS_URL=redis://redis:6379/1
+      - BACKEND_STATUS_URL=http://backend:8000/api/reports/status-update/
+      - WORKER_TOKENS_CRUNCHBASE=dev-crunchbase-token
+      - WORKER_TOKENS_TRACXN=dev-tracxn-token
+      - WORKER_TOKENS_SOCIAL=dev-social-token
+      - LOG_LEVEL=INFO
+    depends_on:
+      redis:
+        condition: service_healthy
     restart: unless-stopped
-
-  tracxn_api:
-    build: ./scrapers/Tracxn_API
-    container_name: mn2-tracxn-api
-    command: sh -c "xvfb-run -a python api.py"
-    volumes:
-      - ./scrapers/Tracxn_API:/app
-    ports:
-      - "8008:8008"
-    environment:
-      PYTHONWARNINGS: "ignore::FutureWarning"
-      PANDAS_FUTURE_NO_SILENT_DOWNCASTING: "True"
-      HEADLESS_MODE: "true"
-      # Note: Database credentials are in scrapers/Tracxn_API/config.py
-      # which connects to remote Liara MySQL
-    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8010/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   # ==========================================================================
   # Django Backend
@@ -134,18 +126,16 @@ services:
       - LIARA_API_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJrZXkiOiI2OTE4MzY0YjFmYjc4MTI5ZDI5MjhiYjgiLCJ0eXBlIjoiYWlfa2V5IiwiaWF0IjoxNzYzMTk0NDQzfQ.SCiUegAiSgB1sscxzNh4TWLZ7KntbZRLk2HGjeA3j0k
       - LIARA_BASE_URL=https://ai.liara.ir/api/6918348a8376cb0a3e18fdef/v1
       - LIARA_MODEL=google/gemini-2.5-flash
-      # Scraper API URLs (internal Docker network)
-      - CRUNCHBASE_SCRAPER_URL=http://crunchbase_api:8003
-      - TRACXN_SCRAPER_URL=http://tracxn_api:8008
+      # Orchestrator URL (replaces direct scraper URLs)
+      - ORCHESTRATOR_URL=http://orchestrator:8010
+      - USE_ORCHESTRATOR=True
     depends_on:
       redis:
         condition: service_healthy
       minio:
         condition: service_healthy
-      crunchbase_api:
-        condition: service_started
-      tracxn_api:
-        condition: service_started
+      orchestrator:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8000/api/health/" ]
@@ -192,18 +182,16 @@ services:
       - LIARA_BASE_URL=https://ai.liara.ir/api/6918348a8376cb0a3e18fdef/v1
       - LIARA_MODEL=google/gemini-2.5-flash
       - SECRET_KEY=dev-secret-key-change-in-production
-      # Scraper API URLs
-      - CRUNCHBASE_SCRAPER_URL=http://crunchbase_api:8003
-      - TRACXN_SCRAPER_URL=http://tracxn_api:8008
+      # Orchestrator URL (replaces direct scraper URLs)
+      - ORCHESTRATOR_URL=http://orchestrator:8010
+      - USE_ORCHESTRATOR=True
     depends_on:
       redis:
         condition: service_healthy
       minio:
         condition: service_healthy
-      crunchbase_api:
-        condition: service_started
-      tracxn_api:
-        condition: service_started
+      orchestrator:
+        condition: service_healthy
     restart: unless-stopped
 
   celery-beat:
@@ -245,13 +233,16 @@ services:
     restart: unless-stopped
 
   # ==========================================================================
-  # Next.js Frontend
+  # Next.js Frontend (Local Development)
   # ==========================================================================
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=http://localhost:8000
+        - NEXT_PUBLIC_WS_URL=ws://localhost:8000
     container_name: mn2-frontend
     volumes:
       - ./frontend/src:/app/src

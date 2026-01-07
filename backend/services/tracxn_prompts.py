@@ -1,13 +1,11 @@
 """
-Tracxn Analysis Prompt Templates.
-Ported from MCP Server tracxn_flow/prompts.py for high-scale platform.
+Tracxn Analysis Prompt Templates - INSTITUTIONAL GRADE.
+Refactored for maximum depth, professional rigor, and strict data adherence.
 
-Per FINAL_ARCHITECTURE_SPECIFICATION.md - Panel 2: Tracxn Analysis.
-Provides prompt templates for:
-- Competitor Identification Reports
-- Market & Funding Insights Reports  
-- Growth Potential Reports
-- Category Summaries
+Key Features:
+1.  **Deep-Dive Due Diligence:** Comprehensive profiling connecting Funding, Growth, and Tech.
+2.  **Anti-Hallucination Protocols:** Strict handling of null metrics ($##) and data anomalies.
+3.  **Strategic Synthesis:** Hierarchical reporting (Flash -> Executive -> Comprehensive).
 """
 
 import json
@@ -15,195 +13,270 @@ from typing import List, Dict, Any
 
 
 class TracxnPromptTemplates:
-    """Container for all prompt templates used in the Tracxn analysis pipeline."""
-    
-    # Base prompt template (NO reference instructions, with Analytics Note)
-    BASE_PROMPT_TEMPLATE = """You are a top-tier market intelligence analyst. Your analysis is sharp, data-driven, and brutally honest, designed for a high-stakes executive audience.
-Analyze the provided Tracxn JSON data for the company and generate a professional report for the specified section.
-Your entire analysis MUST be grounded exclusively in the data provided. Do not invent information or make assumptions beyond what the data supports.
-{target_market_context}
-STRUCTURE REQUIREMENT:
-The report must follow this exact section order:
+    """
+    Container for high-precision analysis prompts. 
+    Designed to extract every ounce of value from the JSON while remaining strictly factual.
+    """
 
-## Overview
-## Market Relevance
-## Metrics and Rankings
-## Key Strengths
-## Key Weaknesses
-## Final Verdict
-
-All sections must appear even when data is missing. If data is unavailable for a section, explicitly say so.
-
-Always specify which exact field is missing rather than just writing "N/A".
-
-Add a closing sentence labeled **Analytics Note** explicitly stating that Diagnostic analytics and Prescriptive analytics have been performed to arrive at these conclusions.
-
-Output the entire report in Markdown format. Do not add a title or heading, just the analysis content itself.
-
-**Company Data (JSON):**
-{company_data}
-
----
-
-**Your Analysis Section:**
-{category_instructions}"""
-    
-    # Summary prompts (with Analytics Note and sample size support)
-    SUMMARY_BASE_TEMPLATE = """You are a senior partner at a top-tier consulting firm, synthesizing field reports into a high-level executive summary for a board of directors. Your summary must be strategic, insightful, and concise.
-{target_market_context}Based ONLY on the following individual company reports, generate a cohesive summary for the specified category.
-Your task is to identify sample-based trends, patterns, common strengths or weaknesses, and significant outliers based strictly on the companies included in these reports.
-
-IMPORTANT: This analysis covers {sample_size} companies. Mention this sample size ONCE at the beginning of your summary, then refer to it simply as "the sample" or "these companies" throughout. Do NOT repeat "N={sample_size}" in every sentence or heading.
-
-Always clarify that these insights reflect only the analyzed sample, not the entire market.
-Do not extrapolate beyond the provided data or reference total market size unless explicitly provided in the JSON.
-
-Add a final **Analytics Note** sentence explicitly stating that Diagnostic analytics and Prescriptive analytics have been performed to arrive at these conclusions.
-
-**Individual Company Reports:**
-{reports_text}
-
----
-
-**Your Summary for: {category_name}**"""
-    
     @staticmethod
     def _format_company_data(company: Dict[str, Any]) -> str:
         """Format company data as JSON string for prompt."""
         return json.dumps(company, indent=2, ensure_ascii=False, default=str)
+
+    # =========================================================================
+    # 1. THE 2-PAGE FLASH ANALYSIS (Outliers, Red Flags & Signal Detection)
+    # =========================================================================
+    @staticmethod
+    def generate_flash_analysis_report(company_reports: List[Dict], executive_summary: str, target_market_context: str = "") -> str:
+        """
+        Generates a high-velocity 'Red Flag / Green Light' report.
+        Focus: Outlier detection, data integrity checks, and immediate market signals.
+        This is generated AFTER company deep dives and executive summary to synthesize findings.
+        """
+        # Format company reports for prompt
+        reports_text = "\n\n".join([
+            f"### {r['company_name']}\n{r['content'][:2000]}..." if len(r['content']) > 2000 else f"### {r['company_name']}\n{r['content']}"
+            for r in company_reports
+        ])
+        
+        return f"""You are a Lead Investment Screener at a top Venture Capital firm. 
+Your task is to produce a **2-Page Flash Analysis Report** synthesizing the detailed analysis below.
+{target_market_context}
+
+**OBJECTIVE:** 
+Identify the highest-potential targets and the highest-risk assets immediately. Cut through the noise. Do not summarize every company. Focus ONLY on outliers and critical signals.
+
+**EXECUTIVE SUMMARY (Already Analyzed):**
+{executive_summary[:3000]}
+
+**INDIVIDUAL COMPANY REPORTS:**
+{reports_text}
+
+**STRICT ANALYSIS GUIDELINES:**
+1.  **No Fluff:** Use bullet points, bold metrics, and concise executive language.
+2.  **Data Integrity Check:** Immediately flag anomalies (e.g., Public companies with <50 employees, Unicorns with no funding data).
+3.  **Relative Performance:** Compare companies against the cohort average.
+4.  **Synthesize:** Pull the most critical insights from the detailed reports above.
+
+**REPORT STRUCTURE (Markdown):**
+
+# ⚡ Market Flash Report: High-Signal Analysis
+
+## 1. The Alpha Cohort (Top 3 Performers)
+*Select the 3 strongest companies based on a synthesis of Revenue Scale, Market Share, and Execution Rank.*
+*   **[Company Name]**: 
+    *   *The Signal:* Why they win (e.g., "Dominant 50% Market Share," "2000% Revenue Growth").
+    *   *The Metric:* Cite the specific data point driving this conclusion.
+
+## 2. Critical Red Flags & Anomalies 🚩
+*Identify companies with dangerous signals or data inconsistencies that require immediate verification.*
+*   **Operational Distress:** Companies with negative employee growth or stale funding (no rounds >3 years).
+*   **Data Anomalies:** Logic breaks (e.g., High Revenue but tiny headcount).
+*   **Opacity Risks:** Companies hiding critical financial data despite high rankings.
+
+## 3. Undervalued / Sleeper Picks
+*Identify 1-2 companies ranked lower (outside top 5) but showing explosive leading indicators (e.g., massive News/Review growth, recent strategic hires).*
+
+## 4. Market Pulse Statistics
+*   **Capital Flow:** Which specific sub-sector is attracting the most *recent* capital?
+*   **Maturity Index:** What % of this cohort is Public/Acquired vs. Early Stage?
+
+**Analytics Note:** Diagnostic analytics and Prescriptive analytics have been performed to arrive at these conclusions."""
+
+    # =========================================================================
+    # 2. THE 5-PAGE EXECUTIVE SUMMARY (Macro-Strategic Synthesis)
+    # =========================================================================
+    @staticmethod
+    def generate_executive_summary(reports: List[str], sample_size: int, target_market_context: str = "") -> str:
+        """
+        Generates a strategic market overview synthesizing all individual reports.
+        Focus: Market maturity, consolidation trends, and capital efficiency.
+        """
+        # Concatenate summaries carefully to manage context window while retaining key insights
+        reports_text = "\n\n".join([f"--- Company Report {i+1} ---\n{report[:4000]}" for i, report in enumerate(reports)])
+
+        return f"""You are a Senior Partner at a Strategy Consulting Firm (e.g., McKinsey, BCG). 
+Write a **5-Page Executive Strategic Assessment** of the provided market landscape.
+{target_market_context}
+
+**CONTEXT:** This analysis covers a sample of {sample_size} companies.
+
+**INPUT DATA:**
+{reports_text}
+
+**TONE & STYLE:** 
+Professional, authoritative, forward-looking, and rigorously objective. Avoid generic statements; anchor every insight in the provided company data.
+
+**REPORT STRUCTURE (Markdown):**
+
+# 🦅 Executive Strategic Landscape Assessment
+
+## 1. Executive Abstract
+*   High-level synthesis of the market's current state (e.g., "Consolidating Mature Market" vs. "Fragmented High-Growth Phase").
+*   Key thesis statement regarding the investment viability of this sector.
+
+## 2. Market Maturity & Competitive Structure
+*   **Concentration Analysis:** Is this a "Winner-Take-All" market? (Reference market share dominance of leaders like Robinhood/Adobe vs. the long tail).
+*   **Exit Liquidity:** Analyze the ratio of Public/Acquired companies to Private ones. What does this say about the exit horizon?
+
+## 3. Technology & Innovation Frontier
+*   **The Tech Stack:** Synthesize the "Technology" sections. What are the non-negotiable tech capabilities (e.g., AI/ML, Mobile-First)?
+*   **Differentiation:** How are the leaders differentiating? (e.g., Comprehensive Platforms vs. Point Solutions).
+
+## 4. Capital Efficiency & Funding Heatmap
+*   **Funding Velocity:** Where is the smart money going? (Analyze recent rounds).
+*   **The "War Chest" vs. "Runway" Split:** Contrast well-capitalized leaders against companies with stale funding. 
+*   **Valuation Trends:** If valuation data exists, analyze the multiples or trends.
+
+## 5. Strategic SWOT (Aggregated)
+*   **Sector Strengths:** Systemic advantages of this market.
+*   **Systemic Weaknesses:** Common vulnerabilities (e.g., lack of profitability transparency, over-reliance on ad-tech).
+*   **External Opportunities:** Emerging global markets or tech shifts.
+*   **Macro Threats:** Regulatory headwinds or saturation risks.
+
+## 6. Strategic Recommendations
+*   **For Entrants:** Where is the white space?
+*   **For Investors:** Where is the risk/reward ratio optimized?
+
+**Analytics Note:** Diagnostic analytics and Prescriptive analytics have been performed to arrive at these conclusions."""
+
+    # =========================================================================
+    # 3. THE COMPREHENSIVE COMPANY PROFILE (Deep Due Diligence)
+    # =========================================================================
+    @staticmethod
+    def generate_comprehensive_company_analysis(company: Dict[str, Any], target_market_context: str = "") -> str:
+        """
+        Generates a detailed, institutional-grade Due Diligence Report for a single company.
+        Includes handling for missing data, specific anomalies, and deep cross-metric analysis.
+        """
+        formatted_context = ""
+        if target_market_context:
+            formatted_context = f"**TARGET MARKET CONTEXT:** {target_market_context}\n\n"
+
+        return f"""You are an Expert Equity Research Analyst conducting deep due diligence.
+Produce a **Comprehensive Institutional Investment Memo** for the company below.
+{formatted_context}
+
+**COMPANY DATA (JSON):**
+{TracxnPromptTemplates._format_company_data(company)}
+
+**CRITICAL INSTRUCTIONS FOR PROFESSIONALISM:**
+1.  **Data Integrity:** If a field contains "$## (##)", "##.##%", or "Cannot be curated", explicitly state: *"Metric undisclosed/unavailable in dataset"* and discuss the implications (e.g., lack of transparency). **DO NOT** hallucinate numbers.
+2.  **Contextual Logic:** 
+    *   If "Employee Count" is dropping, flag as a restructuring/efficiency risk.
+    *   If "Rank" is high but "Funding" is low/stale, investigate operational efficiency or potential stagnation.
+    *   If "Employee Count" is unusually low (e.g., <50) for a Public company, flag as a **Critical Data Anomaly**.
+3.  **Pedigree Analysis:** When analyzing "Key People," highlight universities and past employers to assess management quality.
+
+**REPORT STRUCTURE (Markdown):**
+
+# 📊 {company.get('name', 'Company')} - Due Diligence Report
+
+## 1. Executive Snapshot
+*   **Business Definition:** Precise summary of what they do, their sector, and business model (SaaS, Consumption, etc.).
+*   **Market Positioning:** Where do they sit in the food chain? (Market Leader, Niche Specialist, Distressed Asset).
+*   **Verdict:** (Bullish / Neutral / Bearish / Data Insufficient) based strictly on available evidence.
+
+## 2. Operational & Human Capital Assessment
+*   **Scale:** Analyze Employee Count and Location footprint (Subsidiaries, Legal Entities).
+*   **Growth Trajectory:** Analyze Employee Growth History (YoY). Is the company hiring or firing?
+*   **Leadership Pedigree:** Assess the background of Key People (Education, Ex-Companies). Are they serial entrepreneurs?
+
+## 3. Technology & Product Moat
+*   **Core Offering:** Technical breakdown of the platform/service.
+*   **Innovation:** Keywords indicating tech depth (AI, ML, Cloud-Native, API-First).
+*   **Product Maturity:** Evidence of adoption via Mobile Apps (Downloads, Ratings, Reviews).
+
+## 4. Competitive Landscape & Market Share
+*   **Ranking:** {company.get('name')} ranks **#{company.get('rank', 'N/A')}** among peers. Contextualize this.
+*   **Benchmarking:** Compare against the "Competitor List". Who are the primary threats?
+*   **Market Traction:** Analyze "Market Share" and "News/Review Growth" metrics if available.
+
+## 5. Financial Health & Capital Structure
+*   **Capitalization:** Analyze Total Equity Funding, Latest Round (Date & Amount), and Valuation.
+*   **Runway Assessment:** *Crucial Step:* Look at the date of the latest funding. If >2 years ago and no IPO/Acquisition, flag as "Potential Runway Risk."
+*   **Investor Quality:** Assess the names of Institutional Investors (Tier-1 VCs vs. unknown).
+*   **Profitability Signals:** State Revenue/EBITDA availability. If missing, comment on the opacity.
+
+## 6. Strategic SWOT Analysis
+*   **Strengths:** (Internal - Tech, Team, Capital).
+*   **Weaknesses:** (Internal - Data gaps, Stale funding, Low growth).
+*   **Opportunities:** (External - Market trends, M&A).
+*   **Threats:** (External - Competitors, Regulation).
+
+**Analytics Note:** Diagnostic analytics and Prescriptive analytics have been performed to arrive at these conclusions."""
+
+    # =========================================================================
+    # LEGACY / MAPPING METHODS (For pipeline compatibility)
+    # =========================================================================
     
+    @staticmethod
+    def generate_company_overview(company: Dict[str, Any], target_market_context: str = "") -> str:
+        """Legacy: Maps to comprehensive company analysis."""
+        return TracxnPromptTemplates.generate_comprehensive_company_analysis(company, target_market_context)
+
     @staticmethod
     def generate_competitor_report(company: Dict[str, Any], target_market_context: str = "") -> str:
-        """
-        Generate prompt for competitor identification analysis.
-        
-        Persona: Ruthless Competitive Intelligence Strategist
-        Purpose: Map the competitive battlefield and identify threats.
-        """
-        formatted_context = ""
-        if target_market_context:
-            formatted_context = f"**TARGET MARKET CONTEXT:** {target_market_context}\n\n"
-        
-        category_instructions = """**Persona: A ruthless Competitive Intelligence Strategist from a top-tier firm. Your job is to map the battlefield and identify threats. No sugar-coating.**
+        """Legacy: Maps to comprehensive company analysis."""
+        return TracxnPromptTemplates.generate_comprehensive_company_analysis(company, target_market_context)
 
-**IMPORTANT: Before listing competitors or metrics, provide a brief qualitative explanation of how each competitor's product or domain overlaps with the user's target market focus. This qualitative relevance must appear before any rankings, metrics, or funding comparisons. If overlap is weak or indirect, explicitly state so.**
-
-**CRITICAL: Do not reference or estimate total competitor counts unless they appear directly in the JSON. Never extrapolate beyond the provided data.**
-
-- Analyze the `competitor_summary` and `competitor_list` sections if present.
-- Identify the company's rank among its competitors.
-- Detail the top 3-5 competitors listed. For each, provide their name, funding stage, and a concise summary of their business from the 'description' field.
-- Deliver a direct, no-nonsense verdict on the company's current standing. Based on the data, is it a market leader, a strong contender, or an irrelevant laggard?"""
-        
-        return TracxnPromptTemplates.BASE_PROMPT_TEMPLATE.format(
-            target_market_context=formatted_context,
-            company_data=TracxnPromptTemplates._format_company_data(company),
-            category_instructions=category_instructions
-        )
-    
     @staticmethod
     def generate_market_funding_report(company: Dict[str, Any], target_market_context: str = "") -> str:
-        """
-        Generate prompt for market & funding insights analysis.
-        
-        Persona: Sharp, skeptical Venture Capital Analyst
-        Purpose: Assess financial viability and funding health.
-        """
-        formatted_context = ""
-        if target_market_context:
-            formatted_context = f"**TARGET MARKET CONTEXT:** {target_market_context}\n\n"
-        
-        category_instructions = """**Persona: A sharp, skeptical Venture Capital Analyst. You're looking for signs of a financially sound, high-growth business. Every dollar must be justified.**
-- Scrutinize the funding details, total equity funding, and investor information.
-- State the Total Equity Funding and Latest Funding Round if available.
-- If a valuation is present, state it clearly.
-- List any named investors. If none, state that funding has not been raised.
-- Assess the company's financial viability based on the numbers. Is it well-capitalized or running on fumes? What do the funding benchmarks suggest for its next capital raise?"""
-        
-        return TracxnPromptTemplates.BASE_PROMPT_TEMPLATE.format(
-            target_market_context=formatted_context,
-            company_data=TracxnPromptTemplates._format_company_data(company),
-            category_instructions=category_instructions
-        )
-    
+        """Legacy: Maps to comprehensive company analysis."""
+        return TracxnPromptTemplates.generate_comprehensive_company_analysis(company, target_market_context)
+
     @staticmethod
     def generate_growth_potential_report(company: Dict[str, Any], target_market_context: str = "") -> str:
-        """
-        Generate prompt for growth potential analysis.
-        
-        Persona: Discerning Growth Equity Investor
-        Purpose: Identify scalable growth signals and competitive differentiation.
-        """
-        formatted_context = ""
-        if target_market_context:
-            formatted_context = f"**TARGET MARKET CONTEXT:** {target_market_context}\n\n"
-        
-        category_instructions = """**Persona: A discerning Growth Equity Investor looking for the next unicorn. You are focused on scalable growth signals and competitive differentiation.**
+        """Legacy: Maps to comprehensive company analysis."""
+        return TracxnPromptTemplates.generate_comprehensive_company_analysis(company, target_market_context)
 
-- Focus on employee count, growth indicators, and any ranking data available.
-- Analyze the employee headcount and growth trend if data is available.
-- State the company's Growth Rank or scoring if present and what it implies.
-- Based on growth indicators and any employee data, deliver a final, data-backed verdict on the company's growth potential. Is it poised for significant scaling, or are there clear red flags?"""
-        
-        return TracxnPromptTemplates.BASE_PROMPT_TEMPLATE.format(
-            target_market_context=formatted_context,
-            company_data=TracxnPromptTemplates._format_company_data(company),
-            category_instructions=category_instructions
-        )
-    
+    @staticmethod
+    def generate_tech_product_report(company: Dict[str, Any], target_market_context: str = "") -> str:
+        """Legacy: Maps to comprehensive company analysis."""
+        return TracxnPromptTemplates.generate_comprehensive_company_analysis(company, target_market_context)
+
+    @staticmethod
+    def generate_market_demand_report(company: Dict[str, Any], target_market_context: str = "") -> str:
+        """Legacy: Maps to comprehensive company analysis."""
+        return TracxnPromptTemplates.generate_comprehensive_company_analysis(company, target_market_context)
+
+    @staticmethod
+    def generate_swot_report(company: Dict[str, Any], target_market_context: str = "") -> str:
+        """Legacy: Maps to comprehensive company analysis."""
+        return TracxnPromptTemplates.generate_comprehensive_company_analysis(company, target_market_context)
+
+    # Legacy Summary Mappings (Point all specific summaries to the main Executive Summary)
     @staticmethod
     def generate_competitor_summary(reports: List[str], sample_size: int, target_market_context: str = "") -> str:
-        """Generate prompt for competitor identification summary."""
-        reports_text = "\n\n---\n\n".join([
-            f"Report {i+1}:\n{report}"
-            for i, report in enumerate(reports)
-        ])
-        
-        formatted_context = ""
-        if target_market_context:
-            formatted_context = f"**TARGET MARKET CONTEXT:** {target_market_context}\n\n"
-        
-        return TracxnPromptTemplates.SUMMARY_BASE_TEMPLATE.format(
-            target_market_context=formatted_context,
-            sample_size=sample_size,
-            reports_text=reports_text,
-            category_name="Competitive Landscape Summary"
-        )
-    
+        """Legacy: Maps to executive summary."""
+        return TracxnPromptTemplates.generate_executive_summary(reports, sample_size, target_market_context)
+
     @staticmethod
     def generate_market_funding_summary(reports: List[str], sample_size: int, target_market_context: str = "") -> str:
-        """Generate prompt for market & funding summary."""
-        reports_text = "\n\n---\n\n".join([
-            f"Report {i+1}:\n{report}"
-            for i, report in enumerate(reports)
-        ])
-        
-        formatted_context = ""
-        if target_market_context:
-            formatted_context = f"**TARGET MARKET CONTEXT:** {target_market_context}\n\n"
-        
-        return TracxnPromptTemplates.SUMMARY_BASE_TEMPLATE.format(
-            target_market_context=formatted_context,
-            sample_size=sample_size,
-            reports_text=reports_text,
-            category_name="Market & Funding Insights Summary"
-        )
-    
+        """Legacy: Maps to executive summary."""
+        return TracxnPromptTemplates.generate_executive_summary(reports, sample_size, target_market_context)
+
     @staticmethod
     def generate_growth_potential_summary(reports: List[str], sample_size: int, target_market_context: str = "") -> str:
-        """Generate prompt for growth potential summary."""
-        reports_text = "\n\n---\n\n".join([
-            f"Report {i+1}:\n{report}"
-            for i, report in enumerate(reports)
-        ])
-        
-        formatted_context = ""
-        if target_market_context:
-            formatted_context = f"**TARGET MARKET CONTEXT:** {target_market_context}\n\n"
-        
-        return TracxnPromptTemplates.SUMMARY_BASE_TEMPLATE.format(
-            target_market_context=formatted_context,
-            sample_size=sample_size,
-            reports_text=reports_text,
-            category_name="Growth Potential Summary"
-        )
+        """Legacy: Maps to executive summary."""
+        return TracxnPromptTemplates.generate_executive_summary(reports, sample_size, target_market_context)
+
+    @staticmethod
+    def generate_company_overview_summary(reports: List[str], sample_size: int, target_market_context: str = "") -> str:
+        """Legacy: Maps to executive summary."""
+        return TracxnPromptTemplates.generate_executive_summary(reports, sample_size, target_market_context)
+
+    @staticmethod
+    def generate_tech_product_summary(reports: List[str], sample_size: int, target_market_context: str = "") -> str:
+        """Legacy: Maps to executive summary."""
+        return TracxnPromptTemplates.generate_executive_summary(reports, sample_size, target_market_context)
+
+    @staticmethod
+    def generate_market_demand_summary(reports: List[str], sample_size: int, target_market_context: str = "") -> str:
+        """Legacy: Maps to executive summary."""
+        return TracxnPromptTemplates.generate_executive_summary(reports, sample_size, target_market_context)
+
+    @staticmethod
+    def generate_swot_summary(reports: List[str], sample_size: int, target_market_context: str = "") -> str:
+        """Legacy: Maps to executive summary."""
+        return TracxnPromptTemplates.generate_executive_summary(reports, sample_size, target_market_context)

@@ -1,0 +1,42 @@
+# Remote Tracxn Worker Docker Compose
+# Deploy this on remote servers to run Tracxn API workers
+
+services:
+  # ==========================================================================
+  # Tracxn API Scraper
+  # ==========================================================================
+  tracxn_api:
+    build: ../../scrapers/Tracxn_API
+    container_name: remote-tracxn-api
+    command: sh -c "xvfb-run -a python api.py"
+    volumes:
+      - ../../scrapers/Tracxn_API:/app
+    environment:
+      PYTHONWARNINGS: "ignore::FutureWarning"
+      PANDAS_FUTURE_NO_SILENT_DOWNCASTING: "True"
+      HEADLESS_MODE: "true"
+    restart: unless-stopped
+
+  # ==========================================================================
+  # Worker Agent (connects to main server)
+  # ==========================================================================
+  worker_agent:
+    build: ../../worker_agent
+    container_name: remote-tracxn-worker-agent
+    command: python -m agent
+    environment:
+      - ORCHESTRATOR_URL=${ORCHESTRATOR_URL}
+      - WORKER_TOKEN=${WORKER_TOKEN}
+      - API_TYPE=tracxn
+      - WORKER_NAME=${WORKER_NAME:-tracxn-worker}
+      - LOCAL_API_URL=http://tracxn_api:8008
+      - HEARTBEAT_INTERVAL=${HEARTBEAT_INTERVAL:-10}
+      - RECONNECT_DELAY=${RECONNECT_DELAY:-5}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      - tracxn_api
+    restart: unless-stopped
+
+networks:
+  default:
+    name: remote-tracxn-worker-network

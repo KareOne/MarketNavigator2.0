@@ -1,10 +1,12 @@
 """
 Report Progress Tracker Service.
 Scalable progress tracking for all report types with real-time WebSocket updates.
+Includes connection management to prevent pool exhaustion during long-running tasks.
 """
 import logging
 from typing import Optional, Dict, Any, List
 from django.utils import timezone
+from django.db import connection
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 
@@ -14,6 +16,9 @@ logger = logging.getLogger(__name__)
 class ReportProgressTracker:
     """
     Scalable progress tracker for all report types.
+    
+    Includes connection management to prevent DB pool exhaustion during
+    long-running report generation tasks.
     
     Usage:
         tracker = ReportProgressTracker(report)
@@ -35,32 +40,41 @@ class ReportProgressTracker:
             {'key': 'api_search', 'name': 'Searching Crunchbase', 'description': 'Finding similar companies', 'weight': 8},
             {'key': 'sorting', 'name': 'Ranking Results', 'description': 'Sorting by relevance', 'weight': 2},
             {'key': 'fetching_details', 'name': 'Fetching Company Details', 'description': 'Scraping company data', 'weight': 4},
-            {'key': 'company_overview', 'name': 'Company Overview', 'description': 'Generating market overview', 'weight': 6},
-            {'key': 'tech_product', 'name': 'Technology & Product Analysis', 'description': 'Analyzing tech stack and products', 'weight': 10},
-            {'key': 'market_demand', 'name': 'Market Demand Analysis', 'description': 'Evaluating web traffic and demand', 'weight': 10},
-            {'key': 'competitor', 'name': 'Competitor Analysis', 'description': 'Mapping competitive landscape', 'weight': 10},
-            {'key': 'market_funding', 'name': 'Funding Analysis', 'description': 'Analyzing funding and investors', 'weight': 10},
-            {'key': 'growth_potential', 'name': 'Growth Analysis', 'description': 'Assessing growth opportunities', 'weight': 10},
-            {'key': 'swot', 'name': 'SWOT Analysis', 'description': 'Strategic SWOT assessment', 'weight': 10},
-            {'key': 'summaries', 'name': 'Executive Summaries', 'description': 'Generating category summaries', 'weight': 6},
+            {'key': 'company_deep_dive', 'name': 'Company Deep Dive', 'description': 'Generating detailed 7-part analysis per company', 'weight': 55},
+            {'key': 'strategic_summary', 'name': 'Strategic Summary', 'description': 'Synthesizing market trends and strategic insights', 'weight': 15},
+            {'key': 'fast_analysis', 'name': 'Fast Analysis', 'description': 'Generating executive flash report', 'weight': 10},
             {'key': 'html_gen', 'name': 'Generating Report', 'description': 'Creating HTML report', 'weight': 2},
             {'key': 'save', 'name': 'Saving', 'description': 'Saving report and analysis sections', 'weight': 2},
         ],
         'tracxn': [
             {'key': 'init', 'name': 'Generating Keywords', 'description': 'Creating AI-powered search keywords', 'weight': 3},
-            {'key': 'api_search', 'name': 'Searching Tracxn', 'description': 'Finding similar startups', 'weight': 15},
-            {'key': 'sorting', 'name': 'Ranking Results', 'description': 'Sorting by relevance and scoring', 'weight': 3},
-            {'key': 'fetching_details', 'name': 'Fetching Startup Details', 'description': 'Scraping detailed startup data', 'weight': 10},
-            {'key': 'competitor', 'name': 'Competitor Analysis', 'description': 'Analyzing competitive landscape per startup', 'weight': 15},
-            {'key': 'market_funding', 'name': 'Market & Funding Analysis', 'description': 'Evaluating funding patterns and market fit', 'weight': 15},
-            {'key': 'growth_potential', 'name': 'Growth Potential Analysis', 'description': 'Assessing growth signals and scalability', 'weight': 15},
-            {'key': 'summaries', 'name': 'Executive Summaries', 'description': 'Generating category summaries', 'weight': 12},
-            {'key': 'html_gen', 'name': 'Generating Report', 'description': 'Creating HTML report', 'weight': 6},
-            {'key': 'save', 'name': 'Saving', 'description': 'Saving report and analysis sections', 'weight': 6},
+            {'key': 'api_search', 'name': 'Searching Tracxn', 'description': 'Finding similar startups', 'weight': 10},
+            {'key': 'sorting', 'name': 'Ranking Results', 'description': 'Sorting by relevance and scoring', 'weight': 2},
+            {'key': 'fetching_details', 'name': 'Gathering Company Data', 'description': 'Collecting detailed startup data', 'weight': 5},
+            {'key': 'company_deep_dive', 'name': 'Company Deep Dive', 'description': 'Comprehensive due diligence per company', 'weight': 45},
+            {'key': 'executive_summary', 'name': 'Executive Summary', 'description': '5-page strategic landscape assessment', 'weight': 15},
+            {'key': 'flash_analysis', 'name': 'Flash Analysis', 'description': '2-page synthesis report with outliers and signals', 'weight': 15},
+            {'key': 'html_gen', 'name': 'Generating Report', 'description': 'Creating HTML report', 'weight': 2},
+            {'key': 'save', 'name': 'Saving', 'description': 'Saving report and analysis sections', 'weight': 3},
         ],
         'social': [
-            {'key': 'init', 'name': 'Initializing', 'description': 'Setting up social analysis', 'weight': 10},
-            {'key': 'disabled_notice', 'name': 'Feature Disabled', 'description': 'Social analysis temporarily unavailable', 'weight': 90},
+            {'key': 'init', 'name': 'Generating Keywords', 'description': 'Creating AI-powered social search keywords', 'weight': 5},
+            {'key': 'api_search', 'name': 'Searching Twitter', 'description': 'Searching for relevant discussions and tweets', 'weight': 20},
+            
+            # 10 Analysis Categories
+            {'key': 'Market Segmentation & Needs Analysis', 'name': 'Market Segmentation', 'description': 'Identifying audience groups and needs', 'weight': 7},
+            {'key': 'Jobs To Be Done (JTBD) Mapping', 'name': 'JTBD Mapping', 'description': 'Extracting user goals and jobs to be done', 'weight': 7},
+            {'key': 'Pain Points & Friction', 'name': 'Pain Points Analysis', 'description': 'Cataloging complaints and friction', 'weight': 7},
+            {'key': 'Feature & Product Demand Signals', 'name': 'Feature Demand', 'description': 'Identifying feature requests and gaps', 'weight': 7},
+            {'key': 'Willingness to Pay (WTP) & Pricing', 'name': 'Pricing Analysis', 'description': 'Analyzing WTP and pricing signals', 'weight': 7},
+            {'key': 'Competitive Landscape & Alternatives', 'name': 'Competitive Landscape', 'description': 'Mapping competitors and alternatives', 'weight': 7},
+            {'key': 'Adoption Triggers & Conversion Moments', 'name': 'Adoption Triggers', 'description': 'Identifying conversion moments', 'weight': 7},
+            {'key': 'User Roles & Organizational Context', 'name': 'User Roles', 'description': 'Detecting personas and context', 'weight': 6},
+            {'key': 'Use Cases & Application Scenarios', 'name': 'Use Cases', 'description': 'Describing real-world workflows', 'weight': 6},
+            {'key': 'Sentiment & Brand Perception', 'name': 'Sentiment Analysis', 'description': 'Measuring tone and brand perception', 'weight': 6},
+            
+            {'key': 'Cross-Cutting Insights', 'name': 'Cross-Cutting Insights', 'description': 'generating cross-cutting insights', 'weight': 5},
+            {'key': 'save', 'name': 'Saving', 'description': 'Saving report and analysis sections', 'weight': 3},
         ],
         'pitch_deck': [
             {'key': 'init', 'name': 'Initializing', 'description': 'Gathering project data', 'weight': 10},
@@ -69,7 +83,15 @@ class ReportProgressTracker:
             {'key': 'html_gen', 'name': 'Generating HTML', 'description': 'Creating presentation slides', 'weight': 20},
             {'key': 'save', 'name': 'Saving', 'description': 'Saving pitch deck', 'weight': 10},
         ],
+        'quick_report': [
+            {'key': 'init', 'name': 'Preparing Request', 'description': 'Building market research request', 'weight': 5},
+            {'key': 'api_search', 'name': 'AI Analysis', 'description': 'Generating comprehensive market research with AI', 'weight': 80},
+            {'key': 'save', 'name': 'Saving Report', 'description': 'Saving report sections', 'weight': 15},
+        ],
     }
+    
+    # Number of DB operations before triggering connection cleanup
+    CONNECTION_CLEANUP_INTERVAL = 10
     
     def __init__(self, report):
         """
@@ -81,6 +103,7 @@ class ReportProgressTracker:
         self.report = report
         self.steps_config = self.REPORT_STEPS.get(report.report_type, [])
         self._channel_layer = None
+        self._operation_count = 0  # Track DB operations for periodic cleanup
     
     @property
     def channel_layer(self):
@@ -88,6 +111,14 @@ class ReportProgressTracker:
         if self._channel_layer is None:
             self._channel_layer = get_channel_layer()
         return self._channel_layer
+    
+    def _maybe_cleanup_connection(self):
+        """Periodically close DB connection to prevent pool exhaustion."""
+        self._operation_count += 1
+        if self._operation_count >= self.CONNECTION_CLEANUP_INTERVAL:
+            connection.close()
+            self._operation_count = 0
+            logger.debug("Progress tracker: Released DB connection")
     
     def initialize_steps(self) -> List:
         """
@@ -116,6 +147,7 @@ class ReportProgressTracker:
             created_steps.append(step)
         
         logger.info(f"📋 Initialized {len(created_steps)} progress steps for {self.report.report_type}")
+        self._maybe_cleanup_connection()  # Release connection after batch of creates
         self._broadcast_update()
         return created_steps
     
@@ -143,6 +175,7 @@ class ReportProgressTracker:
             self.report.save(update_fields=['current_step', 'progress', 'updated_at'])
             
             logger.info(f"▶️ Started step: {step.step_name}")
+            self._maybe_cleanup_connection()
             self._broadcast_update()
             return step
         except ReportProgressStep.DoesNotExist:
@@ -208,6 +241,9 @@ class ReportProgressTracker:
         Add a real-time detail item to a step's details array.
         This is used to show granular progress like individual keyword searches.
         
+        If the step doesn't exist yet, it will be auto-started to allow real-time
+        status updates from external API callbacks.
+        
         Args:
             step_key: The key identifier for the step
             detail_type: Type of detail (e.g., 'keywords', 'search_result', 'company_found')
@@ -219,30 +255,48 @@ class ReportProgressTracker:
         
         try:
             step = ReportProgressStep.objects.get(report=self.report, step_key=step_key)
-            
-            # Build detail item
-            detail_item = {
-                'type': detail_type,
-                'message': message,
-                'timestamp': time.time(),
-            }
-            if data:
-                detail_item['data'] = data
-            
-            # Append to details array (limit to last 50 items to prevent bloat)
-            details = step.details or []
-            details.append(detail_item)
-            if len(details) > 50:
-                details = details[-50:]
-            
-            step.details = details
-            step.save(update_fields=['details', 'updated_at'])
-            
-            logger.info(f"📝 Added detail to step {step_key}: {detail_type} - {message[:50]}...")
-            
-            self._broadcast_update()
         except ReportProgressStep.DoesNotExist:
-            logger.warning(f"⚠️ Step {step_key} not found for adding detail")
+            # Auto-start the step if it doesn't exist (for real-time API callbacks)
+            step_info = self._get_step_info(step_key)
+            if step_info:
+                logger.info(f"📤 Auto-starting step {step_key} for incoming status update")
+                step = ReportProgressStep.objects.create(
+                    report=self.report,
+                    step_key=step_key,
+                    name=step_info['name'],
+                    description=step_info['description'],
+                    status='in_progress',
+                    started_at=timezone.now()
+                )
+                # Update report model
+                self.report.current_step = step_info['name']
+                self.report.save(update_fields=['current_step', 'updated_at'])
+            else:
+                logger.warning(f"⚠️ Step {step_key} not found in REPORT_STEPS, cannot auto-start")
+                return
+        
+        # Build detail item
+        detail_item = {
+            'type': detail_type,
+            'message': message,
+            'timestamp': time.time(),
+        }
+        if data:
+            detail_item['data'] = data
+        
+        # Append to details array (limit to last 50 items to prevent bloat)
+        details = step.details or []
+        details.append(detail_item)
+        if len(details) > 50:
+            details = details[-50:]
+        
+        step.details = details
+        step.save(update_fields=['details', 'updated_at'])
+        
+        logger.info(f"📝 Added detail to step {step_key}: {detail_type} - {message[:50]}...")
+        
+        self._maybe_cleanup_connection()  # Periodic cleanup for frequent detail adds
+        self._broadcast_update()
     
     def clear_step_details(self, step_key: str):
         """Clear all details for a step (useful when restarting)."""
@@ -278,7 +332,11 @@ class ReportProgressTracker:
             if metadata:
                 step.metadata = metadata
             step.calculate_duration()
-            step.save()
+            # Use update_fields to avoid overwriting 'details' added by real-time updates
+            update_fields = ['status', 'completed_at', 'progress_percent', 'duration_seconds', 'updated_at']
+            if metadata:
+                update_fields.append('metadata')
+            step.save(update_fields=update_fields)
             
             # Record timing for future predictions
             if step.duration_seconds and step.duration_seconds > 0:
@@ -295,6 +353,7 @@ class ReportProgressTracker:
             
             duration_str = f"{step.duration_seconds:.1f}s" if step.duration_seconds else "N/A"
             logger.info(f"✅ Completed step: {step.step_name} (duration: {duration_str})")
+            self._maybe_cleanup_connection()
             self._broadcast_update()
             return step
         except ReportProgressStep.DoesNotExist:
@@ -320,7 +379,8 @@ class ReportProgressTracker:
             step.completed_at = timezone.now()
             step.error_message = error_message
             step.calculate_duration()
-            step.save()
+            # Use update_fields to avoid overwriting 'details' added by real-time updates
+            step.save(update_fields=['status', 'completed_at', 'error_message', 'duration_seconds', 'updated_at'])
             
             logger.error(f"❌ Failed step: {step.step_name} - {error_message}")
             self._broadcast_update()
@@ -349,7 +409,11 @@ class ReportProgressTracker:
             step.progress_percent = 100
             if reason:
                 step.metadata = {'skip_reason': reason}
-            step.save()
+            # Use update_fields to avoid overwriting 'details' added by real-time updates
+            update_fields = ['status', 'completed_at', 'progress_percent', 'updated_at']
+            if reason:
+                update_fields.append('metadata')
+            step.save(update_fields=update_fields)
             
             logger.info(f"⏭️ Skipped step: {step.step_name}")
             self._broadcast_update()

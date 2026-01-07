@@ -20,8 +20,19 @@ except ImportError:
 
 app = FastAPI()
 
+# Status callback URL for progress updates
+# In local deployment, calls backend directly
+# In remote deployment with worker agent, calls the worker agent's status proxy
+STATUS_CALLBACK_URL = os.getenv('STATUS_CALLBACK_URL', 'http://worker_agent:9099')
+
 # Global dictionary to track active requests and cancellation flags
 active_requests = {}
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for worker agent to verify API is ready."""
+    return {"status": "healthy", "api": "crunchbase"}
 
 @app.post("/cancel/{request_id}")
 async def cancel_request(request_id: str):
@@ -708,7 +719,7 @@ async def search_top_similar_companies_with_rank(
                     "data": data or {}
                 }
                 response = await client.post(
-                    "http://backend:8000/api/reports/status-update/",
+                    f"{STATUS_CALLBACK_URL}/api/reports/status-update/",
                     json=payload,
                     headers={"Content-Type": "application/json"}
                 )
@@ -901,14 +912,6 @@ async def search_top_similar_companies_with_rank(
             
             print(f"✅ Similarity ranking completed in {similarity_time:.2f}s")
             
-            # Send status: Companies ranked
-            send_status_update(
-                "sorting",
-                "top_companies",
-                f"Top {top_count} companies selected",
-                {"total_companies": len(similar_companies)}
-            )
-            
             # Calculate rank scores and combined scores
             all_companies_with_scores = []
             for similar_comp in similar_companies:
@@ -945,6 +948,37 @@ async def search_top_similar_companies_with_rank(
             # Add ranks
             for i, company in enumerate(all_companies_with_scores):
                 company["combined_rank"] = i + 1
+            
+            # Send status: Top companies ranked
+            send_status_update(
+                "sorting",
+                "top_companies",
+                f"Top {top_count} companies selected",
+                {"total_companies": len(all_companies_with_scores)}
+            )
+            
+            # Send individual company rankings for real-time display
+            # These are persisted via StatusUpdateView → add_step_detail → database
+            # tasks.py has deduplication check to skip if these already exist
+            for i, comp in enumerate(all_companies_with_scores[:top_count]):
+                # Extract clean company name from URL
+                name = comp["url"].split("/")[-1].replace("-", " ").title()
+                cb_rank = comp.get("cb_rank", "N/A")
+                description = comp.get("description", "")
+                
+                send_status_update(
+                    "sorting",
+                    "company_rank",
+                    f"{i+1}. {name} (CB Rank: {cb_rank})",
+                    {
+                        "rank": i + 1,
+                        "name": name,
+                        "cb_rank": cb_rank,
+                        "description": description,
+                        "similarity_score": comp.get("similarity_score"),
+                        "combined_score": comp.get("combined_score")
+                    }
+                )
             
             # Get top N URLs to scrape for full data (based on combined score)
             top_urls_to_scrape = [comp["url"] for comp in all_companies_with_scores[:top_count]]
@@ -1067,6 +1101,84 @@ async def search_top_similar_companies_with_rank(
         if request_id and request_id in active_requests:
             del active_requests[request_id]
             print(f"🗑️ Cleaned up request {request_id}")
+
+
+# =============================================================================
+# Database Enrichment Endpoint
+# =============================================================================
+
+@app.post("/enrich/crunchbase")
+async def enrichment_search(
+    keyword: str = Body(..., description="Keyword to search for"),
+    num_companies: int = Body(50, description="Number of companies to scrape"),
+    days_threshold: int = Body(180, description="Days threshold - defaults to 180 for enrichment"),
+    enrichment_keyword_id: int = Body(None, description="Django keyword ID for callback"),
+) -> Dict:
+    """
+    Database enrichment endpoint - used by orchestrator for background enrichment.
+    
+    This endpoint is specifically designed for background database enrichment:
+    - Uses 180-day freshness threshold by default (vs 15 days for user searches)
+    - Reports progress for monitoring
+    - Returns detailed statistics for tracking
+    
+    The endpoint searches for companies matching the keyword and scrapes
+    their full details, skipping any scraped within days_threshold.
+    """
+    try:
+        start_time = time.time()
+        
+        print(f"\n{'='*60}")
+        print(f"📚 ENRICHMENT: Starting enrichment for '{keyword}'")
+        print(f"   Companies to scrape: {num_companies}")
+        print(f"   Days threshold: {days_threshold}")
+        print(f"   Keyword ID: {enrichment_keyword_id}")
+        print(f"{'='*60}\n")
+        
+        # Run the scraper with enrichment settings
+        result = await run_scraper(
+            keyword,
+            num_companies=num_companies,
+            days_threshold=days_threshold
+        )
+        
+        elapsed_time = time.time() - start_time
+        
+        # Calculate statistics
+        companies_scraped = len(result) if result else 0
+        
+        response_data = {
+            "success": True,
+            "keyword": keyword,
+            "enrichment_keyword_id": enrichment_keyword_id,
+            "companies_found": companies_scraped,  # From search results
+            "companies_scraped": companies_scraped,  # Actually scraped
+            "companies_skipped": 0,  # Could be calculated from scraper
+            "elapsed_time_seconds": round(elapsed_time, 2),
+            "data": result
+        }
+        
+        print(f"\n{'='*60}")
+        print(f"✅ ENRICHMENT COMPLETE: '{keyword}'")
+        print(f"   Companies scraped: {companies_scraped}")
+        print(f"   Time: {elapsed_time:.2f}s")
+        print(f"{'='*60}\n")
+        
+        return response_data
+        
+    except Exception as e:
+        print(f"❌ ENRICHMENT ERROR for '{keyword}': {e}")
+        return {
+            "success": False,
+            "keyword": keyword,
+            "enrichment_keyword_id": enrichment_keyword_id,
+            "companies_found": 0,
+            "companies_scraped": 0,
+            "companies_skipped": 0,
+            "error": str(e)
+        }
+
+
 
 
 @app.get("/companies/all")

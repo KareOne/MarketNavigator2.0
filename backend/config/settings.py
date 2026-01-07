@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     'apps.sharing',
     'apps.files',
     'apps.audit',  # Audit logging
+    'apps.admin.apps.AdminConfig',  # Admin panel and enrichment feature
 ]
 
 MIDDLEWARE = [
@@ -60,6 +61,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'core.middleware.AuditMiddleware',  # Custom audit logging
+    'core.middleware.DatabaseCleanupMiddleware',  # Ensure DB connections are closed
 ]
 
 ROOT_URLCONF = 'config.urls'
@@ -96,10 +98,12 @@ DATABASES = {
         'HOST': os.getenv('DB_HOST', 'localhost'),
         'PORT': os.getenv('DB_PORT', '5432'),
         'POOL_OPTIONS': {
-            'POOL_SIZE': 10,  # Min connections
-            'MAX_OVERFLOW': 20,  # Additional connections under load
-            'RECYCLE': 300,  # Recycle connections after 5 minutes
+            'POOL_SIZE': 20,  # Increased to handle concurrent celery workers + API
+            'MAX_OVERFLOW': 20,  # Allow bursts up to 40 connections total
+            'RECYCLE': 120,  # Recycle connections after 2 minutes (shorter for cloud DB)
             'PRE_PING': True,  # Verify connection before use
+            'POOL_TIMEOUT': 30,  # Wait max 30s for connection from pool
+            'POOL_USE_LIFO': True,  # LIFO reduces number of stale connections
         },
         'CONN_MAX_AGE': None,  # Managed by pool
     }
@@ -173,9 +177,14 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'UTC'
 CELERY_TASK_TRACK_STARTED = True
-CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes max
+# Time limits must exceed orchestrator TASK_TIMEOUT (2 hours) since Celery waits for orchestrator
+CELERY_TASK_TIME_LIMIT = 3 * 60 * 60  # 3 hours max
 CELERY_WORKER_CONCURRENCY = int(os.getenv('CELERY_CONCURRENCY', '4'))
-CELERY_TASK_SOFT_TIME_LIMIT = 25 * 60  # 25 minutes soft limit
+CELERY_TASK_SOFT_TIME_LIMIT = int(2.5 * 60 * 60)  # 2.5 hours soft limit
+
+# Connection management: Recycle workers to release DB connections
+CELERY_WORKER_MAX_TASKS_PER_CHILD = 100  # Restart worker after 100 tasks to release connections
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1  # Don't prefetch tasks, reduces connection holding
 
 # Celery Beat scheduled tasks
 CELERY_BEAT_SCHEDULE = {
@@ -282,6 +291,7 @@ REST_FRAMEWORK = {
         'anon': '100/hour',
         'user': '1000/hour',
         'burst': '60/minute',
+        'status_updates': '2000/minute',  # High throughput for internal status updates
     },
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
@@ -364,6 +374,13 @@ LINKEDIN_CLIENT_SECRET = os.getenv('LINKEDIN_CLIENT_SECRET', '')
 # =============================================================================
 CRUNCHBASE_SCRAPER_URL = os.getenv('CRUNCHBASE_SCRAPER_URL', 'http://crunchbase_api:8003')
 TRACXN_SCRAPER_URL = os.getenv('TRACXN_SCRAPER_URL', 'http://tracxn_api:8008')
+
+# =============================================================================
+# ORCHESTRATOR (Remote Workers)
+# Routes scraper tasks to remote workers when enabled
+# =============================================================================
+USE_ORCHESTRATOR = os.getenv('USE_ORCHESTRATOR', 'false').lower() in ('true', '1', 'yes')
+ORCHESTRATOR_URL = os.getenv('ORCHESTRATOR_URL', 'http://orchestrator:8010')
 
 # =============================================================================
 # INTERNATIONALIZATION

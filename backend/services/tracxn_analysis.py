@@ -1,16 +1,11 @@
 """
 Tracxn Analysis Pipeline Service.
-Orchestrates 6-step AI analysis process with progress tracking.
-
-Per FINAL_ARCHITECTURE_SPECIFICATION.md - Panel 2: Tracxn Analysis.
+Orchestrates 3-step institutional-grade AI analysis with progress tracking.
 
 Pipeline Steps:
-1. Generate Competitor Identification Reports (per company)
-2. Generate Market & Funding Insights Reports (per company)
-3. Generate Growth Potential Reports (per company)
-4. Generate Competitor Identification Summary (aggregate)
-5. Generate Market & Funding Insights Summary (aggregate)
-6. Generate Growth Potential Summary (aggregate)
+1. Flash Analysis (2-page) - High-signal market flash report
+2. Company Deep Dive (per company) - Comprehensive due diligence 
+3. Executive Summary (5-page) - Strategic landscape assessment
 """
 import logging
 import time
@@ -28,15 +23,12 @@ logger = logging.getLogger(__name__)
 
 class TracxnAnalysisPipeline:
     """
-    Main pipeline for analyzing Tracxn startup data through 6 AI steps.
+    Main pipeline for analyzing Tracxn startup data through 3 institutional-grade AI steps.
     
     Pipeline Steps:
-    1. Generate Competitor Identification Reports (all companies)
-    2. Generate Market & Funding Insights Reports (all companies)
-    3. Generate Growth Potential Reports (all companies)
-    4. Generate Competitor Identification Summary (aggregate)
-    5. Generate Market & Funding Insights Summary (aggregate)
-    6. Generate Growth Potential Summary (aggregate)
+    1. Flash Analysis - 2-page market flash report with outliers and signals
+    2. Company Deep Dive - Comprehensive due diligence per company
+    3. Executive Summary - 5-page strategic landscape assessment
     """
     
     def __init__(
@@ -75,7 +67,7 @@ class TracxnAnalysisPipeline:
         
         logger.info(f"Initialized TracxnAnalysisPipeline with model: {self.model}")
     
-    async def _call_ai(self, prompt: str, max_tokens: int = 3000) -> str:
+    async def _call_ai(self, prompt: str, max_tokens: int = 4000) -> str:
         """Call OpenAI API with the given prompt."""
         try:
             response = await self.client.chat.completions.create(
@@ -103,7 +95,7 @@ class TracxnAnalysisPipeline:
         max_companies: int = 15
     ) -> Dict[str, Any]:
         """
-        Run the complete 6-step analysis pipeline.
+        Run the complete 3-step analysis pipeline.
         
         Args:
             companies: List of company data dictionaries from Tracxn scraper
@@ -118,121 +110,67 @@ class TracxnAnalysisPipeline:
         companies_to_analyze = companies[:max_companies]
         num_companies = len(companies_to_analyze)
         
-        logger.info(f"Starting Tracxn analysis for {num_companies} companies")
+        logger.info(f"Starting Tracxn 3-step institutional analysis for {num_companies} companies")
         
         result = {
             'company_count': num_companies,
-            'competitor_reports': [],
-            'market_funding_reports': [],
-            'growth_potential_reports': [],
-            'competitor_summary': '',
-            'market_funding_summary': '',
-            'growth_potential_summary': '',
+            # New 3-step structure
+            'flash_analysis': '',
+            'company_reports': [],
+            'executive_summary': '',
+            # Metadata
             'processing_time': 0,
             'generated_at': datetime.now().isoformat(),
         }
         
         try:
-            # Step 1: Competitor Identification Reports
-            logger.info("Step 1: Generating competitor identification reports...")
-            await self._update_progress("competitor", "Analyzing competitive landscape", 15)
+            # ===== Step 1: Company Deep Dive (per company) =====
+            logger.info("Step 1/3: Generating Company Deep Dive Reports...")
+            await self._update_progress("company_deep_dive", "Generating comprehensive due diligence", 10)
             
             for i, company in enumerate(companies_to_analyze):
                 company_name = company.get('name', company.get('Company Name', f'Company {i+1}'))
                 try:
-                    prompt = self.prompts.generate_competitor_report(
+                    prompt = self.prompts.generate_comprehensive_company_analysis(
                         company, self.target_market_description
                     )
-                    report = await self._call_ai(prompt)
-                    result['competitor_reports'].append({
+                    report = await self._call_ai(prompt, max_tokens=4000)
+                    result['company_reports'].append({
                         'company_name': company_name,
                         'content': report
                     })
                 except Exception as e:
-                    logger.error(f"Competitor report failed for {company_name}: {e}")
-                    result['competitor_reports'].append({
+                    logger.error(f"Company deep dive failed for {company_name}: {e}")
+                    result['company_reports'].append({
                         'company_name': company_name,
                         'content': f"Analysis error: {str(e)}"
                     })
             
-            # Step 2: Market & Funding Insights Reports
-            logger.info("Step 2: Generating market & funding insights reports...")
-            await self._update_progress("market_funding", "Analyzing funding patterns", 30)
+            # ===== Step 2: Executive Summary (5-page) =====
+            logger.info("Step 2/3: Generating Executive Summary...")
+            await self._update_progress("executive_summary", "Generating 5-page strategic assessment", 70)
             
-            for i, company in enumerate(companies_to_analyze):
-                company_name = company.get('name', company.get('Company Name', f'Company {i+1}'))
-                try:
-                    prompt = self.prompts.generate_market_funding_report(
-                        company, self.target_market_description
-                    )
-                    report = await self._call_ai(prompt)
-                    result['market_funding_reports'].append({
-                        'company_name': company_name,
-                        'content': report
-                    })
-                except Exception as e:
-                    logger.error(f"Market funding report failed for {company_name}: {e}")
-                    result['market_funding_reports'].append({
-                        'company_name': company_name,
-                        'content': f"Analysis error: {str(e)}"
-                    })
-            
-            # Step 3: Growth Potential Reports
-            logger.info("Step 3: Generating growth potential reports...")
-            await self._update_progress("growth_potential", "Evaluating growth potential", 45)
-            
-            for i, company in enumerate(companies_to_analyze):
-                company_name = company.get('name', company.get('Company Name', f'Company {i+1}'))
-                try:
-                    prompt = self.prompts.generate_growth_potential_report(
-                        company, self.target_market_description
-                    )
-                    report = await self._call_ai(prompt)
-                    result['growth_potential_reports'].append({
-                        'company_name': company_name,
-                        'content': report
-                    })
-                except Exception as e:
-                    logger.error(f"Growth potential report failed for {company_name}: {e}")
-                    result['growth_potential_reports'].append({
-                        'company_name': company_name,
-                        'content': f"Analysis error: {str(e)}"
-                    })
-            
-            # Step 4: Competitor Identification Summary
-            logger.info("Step 4: Generating competitor identification summary...")
-            await self._update_progress("summaries", "Generating executive summaries", 60)
-            
-            competitor_texts = [r['content'] for r in result['competitor_reports']]
-            prompt = self.prompts.generate_competitor_summary(
-                competitor_texts, num_companies, self.target_market_description
+            report_texts = [r['content'] for r in result['company_reports']]
+            prompt = self.prompts.generate_executive_summary(
+                report_texts, num_companies, self.target_market_description
             )
-            result['competitor_summary'] = await self._call_ai(prompt, max_tokens=4000)
+            result['executive_summary'] = await self._call_ai(prompt, max_tokens=5000)
             
-            # Step 5: Market & Funding Summary
-            logger.info("Step 5: Generating market & funding summary...")
-            await self._update_progress("summaries", "Generating market funding summary", 75)
+            # ===== Step 3: Flash Analysis (2-page synthesis) =====
+            logger.info("Step 3/3: Generating Flash Analysis Report...")
+            await self._update_progress("flash_analysis", "Generating 2-page synthesis report", 90)
             
-            market_texts = [r['content'] for r in result['market_funding_reports']]
-            prompt = self.prompts.generate_market_funding_summary(
-                market_texts, num_companies, self.target_market_description
+            prompt = self.prompts.generate_flash_analysis_report(
+                result['company_reports'],
+                result['executive_summary'],
+                self.target_market_description
             )
-            result['market_funding_summary'] = await self._call_ai(prompt, max_tokens=4000)
-            
-            # Step 6: Growth Potential Summary
-            logger.info("Step 6: Generating growth potential summary...")
-            await self._update_progress("summaries", "Generating growth potential summary", 90)
-            
-            growth_texts = [r['content'] for r in result['growth_potential_reports']]
-            prompt = self.prompts.generate_growth_potential_summary(
-                growth_texts, num_companies, self.target_market_description
-            )
-            result['growth_potential_summary'] = await self._call_ai(prompt, max_tokens=4000)
+            result['flash_analysis'] = await self._call_ai(prompt, max_tokens=3000)
             
             # Calculate processing time
             result['processing_time'] = time.time() - start_time
             
-            logger.info(f"Tracxn analysis completed in {result['processing_time']:.2f}s")
+            logger.info(f"Tracxn 3-step analysis completed in {result['processing_time']:.2f}s")
             
             return result
             
@@ -391,6 +329,16 @@ def generate_tracxn_html(result: Dict[str, Any], startup_name: str = "Your Start
             color: var(--text-primary);
         }}
         
+        .flash-section {{
+            background: linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, rgba(99, 102, 241, 0.1) 100%);
+            border-left: 4px solid var(--accent);
+        }}
+        
+        .executive-section {{
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(99, 102, 241, 0.1) 100%);
+            border-left: 4px solid var(--secondary);
+        }}
+        
         .company-report {{
             background: rgba(99, 102, 241, 0.1);
             border-radius: 8px;
@@ -402,11 +350,6 @@ def generate_tracxn_html(result: Dict[str, Any], startup_name: str = "Your Start
         .company-report h4 {{
             color: var(--text-primary);
             margin-bottom: 1rem;
-        }}
-        
-        .summary-section {{
-            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(99, 102, 241, 0.1) 100%);
-            border-left: 4px solid var(--secondary);
         }}
         
         table {{
@@ -461,7 +404,7 @@ def generate_tracxn_html(result: Dict[str, Any], startup_name: str = "Your Start
     <div class="container">
         <header>
             <h1>🔍 Tracxn Market Analysis</h1>
-            <p class="subtitle">Comprehensive startup landscape analysis for {startup_name}</p>
+            <p class="subtitle">Institutional-Grade Startup Landscape Analysis for {startup_name}</p>
             <div class="stats">
                 <div class="stat">
                     <div class="stat-value">{result.get('company_count', 0)}</div>
@@ -472,86 +415,51 @@ def generate_tracxn_html(result: Dict[str, Any], startup_name: str = "Your Start
                     <div class="stat-label">Processing Time</div>
                 </div>
                 <div class="stat">
-                    <div class="stat-value">6</div>
+                    <div class="stat-value">3</div>
                     <div class="stat-label">Analysis Steps</div>
                 </div>
             </div>
         </header>
 """)
     
-    # Competitor Summary Section
-    if result.get('competitor_summary'):
+    # Flash Analysis Section
+    if result.get('flash_analysis'):
         html_parts.append(f"""
-        <div class="section summary-section">
-            <h2>🎯 Competitive Landscape Summary</h2>
-            {md_to_html(result['competitor_summary'])}
+        <div class="section flash-section">
+            <h2>⚡ Flash Analysis Report</h2>
+            {md_to_html(result['flash_analysis'])}
         </div>
 """)
     
-    # Market & Funding Summary Section
-    if result.get('market_funding_summary'):
+    # Executive Summary Section
+    if result.get('executive_summary'):
         html_parts.append(f"""
-        <div class="section summary-section">
-            <h2>💰 Market & Funding Insights Summary</h2>
-            {md_to_html(result['market_funding_summary'])}
+        <div class="section executive-section">
+            <h2>🦅 Executive Strategic Assessment</h2>
+            {md_to_html(result['executive_summary'])}
         </div>
 """)
     
-    # Growth Potential Summary Section
-    if result.get('growth_potential_summary'):
-        html_parts.append(f"""
-        <div class="section summary-section">
-            <h2>📈 Growth Potential Summary</h2>
-            {md_to_html(result['growth_potential_summary'])}
-        </div>
-""")
-    
-    # Per-Company Reports Section
-    html_parts.append("""
+    # Company Deep Dive Reports Section
+    if result.get('company_reports'):
+        html_parts.append("""
         <div class="section">
-            <h2>📊 Individual Company Analysis</h2>
+            <h2>📊 Company Deep Dive Reports</h2>
 """)
-    
-    # Competitor Reports
-    if result.get('competitor_reports'):
-        html_parts.append("<h3>Competitive Intelligence Reports</h3>")
-        for report in result['competitor_reports']:
+        for report in result['company_reports']:
             html_parts.append(f"""
             <div class="company-report">
                 <h4>{report['company_name']}</h4>
                 {md_to_html(report['content'])}
             </div>
 """)
-    
-    # Market & Funding Reports
-    if result.get('market_funding_reports'):
-        html_parts.append("<h3>Market & Funding Reports</h3>")
-        for report in result['market_funding_reports']:
-            html_parts.append(f"""
-            <div class="company-report">
-                <h4>{report['company_name']}</h4>
-                {md_to_html(report['content'])}
-            </div>
-""")
-    
-    # Growth Potential Reports
-    if result.get('growth_potential_reports'):
-        html_parts.append("<h3>Growth Potential Reports</h3>")
-        for report in result['growth_potential_reports']:
-            html_parts.append(f"""
-            <div class="company-report">
-                <h4>{report['company_name']}</h4>
-                {md_to_html(report['content'])}
-            </div>
-""")
-    
-    html_parts.append("</div>")  # Close per-company section
+        html_parts.append("</div>")
     
     # Footer
     html_parts.append(f"""
         <footer>
             <p>Generated by Market Navigator • {result.get('generated_at', datetime.now().isoformat())}</p>
-            <p>Powered by Tracxn Data & AI Analysis</p>
+            <p>Powered by Tracxn Data & 3-Step Institutional AI Analysis</p>
         </footer>
     </div>
 </body>
