@@ -359,8 +359,12 @@ METIS_MODEL = os.getenv('METIS_MODEL', 'gpt-4o-mini')
 # Compresses older chat history into summaries to reduce context size
 # =============================================================================
 CHAT_SUMMARY_BATCH_SIZE = int(os.getenv('CHAT_SUMMARY_BATCH_SIZE', '10'))  # Messages per summary batch
-SUMMARIZATION_MODEL = os.getenv('SUMMARIZATION_MODEL', 'google/gemini-2.0-flash')  # Fast/cheap model for summaries
+SUMMARIZATION_MODEL = os.getenv('SUMMARIZATION_MODEL', 'gemini-2.0-flash')  # Fast/cheap model for summaries
 CHAT_RECENT_MESSAGES_LIMIT = int(os.getenv('CHAT_RECENT_MESSAGES_LIMIT', '10'))  # Keep N recent messages unsummarized
+
+# Google AI Studio (direct API)
+GOOGLE_AI_API_KEY = os.getenv('GOOGLE_AI_API_KEY', 'AIzaSyAVT7UUG509rjlmjGd2dpctJSVq08Baddw')
+GOOGLE_AI_BASE_URL = os.getenv('GOOGLE_AI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta')
 
 CRUNCHBASE_API_KEY = os.getenv('CRUNCHBASE_API_KEY', '')
 CRUNCHBASE_API_URL = 'https://api.crunchbase.com/api/v4'

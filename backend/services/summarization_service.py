@@ -15,6 +15,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from django.conf import settings
 from openai import OpenAI
 import json
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -29,26 +30,39 @@ class SummarizationService:
     
     def __init__(self):
         # Get summarization-specific settings
-        self.api_key = getattr(settings, 'LIARA_API_KEY', None)
-        self.base_url = getattr(settings, 'LIARA_BASE_URL', None)
-        self.model = getattr(settings, 'SUMMARIZATION_MODEL', 'google/gemini-2.0-flash')
+        self.model = getattr(settings, 'SUMMARIZATION_MODEL', 'gemini-2.0-flash')
         self.batch_size = getattr(settings, 'CHAT_SUMMARY_BATCH_SIZE', 10)
         
-        if self.api_key and self.base_url:
-            self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
-            logger.info(f"SummarizationService initialized with {self.model}")
+        # Try Google AI Studio first (direct API)
+        self.google_api_key = getattr(settings, 'GOOGLE_AI_API_KEY', None)
+        self.google_base_url = getattr(settings, 'GOOGLE_AI_BASE_URL', None)
+        
+        if self.google_api_key and self.google_base_url:
+            self.client = None  # We'll use requests directly
+            self.provider = 'google'
+            logger.info(f"SummarizationService initialized with Google AI Studio ({self.model})")
         else:
-            # Fallback to OpenAI
-            self.api_key = getattr(settings, 'OPENAI_API_KEY', '')
-            self.model = getattr(settings, 'SUMMARIZATION_MODEL', 'gpt-4o-mini')
-            self.base_url = None
+            # Try Liara AI (OpenAI-compatible)
+            self.api_key = getattr(settings, 'LIARA_API_KEY', None)
+            self.base_url = getattr(settings, 'LIARA_BASE_URL', None)
             
-            if self.api_key:
-                self.client = OpenAI(api_key=self.api_key)
-                logger.info(f"SummarizationService initialized with OpenAI {self.model}")
+            if self.api_key and self.base_url:
+                self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+                self.provider = 'liara'
+                logger.info(f"SummarizationService initialized with Liara AI ({self.model})")
             else:
-                self.client = None
-                logger.warning("SummarizationService: No API key configured")
+                # Fallback to OpenAI
+                self.api_key = getattr(settings, 'OPENAI_API_KEY', '')
+                self.base_url = None
+                
+                if self.api_key:
+                    self.client = OpenAI(api_key=self.api_key)
+                    self.provider = 'openai'
+                    logger.info(f"SummarizationService initialized with OpenAI ({self.model})")
+                else:
+                    self.client = None
+                    self.provider = None
+                    logger.warning("SummarizationService: No API key configured")
     
     def summarize_messages(self, messages: List[Dict[str, Any]], project_context: str = "") -> Tuple[str, int, int]:
         """
@@ -96,17 +110,22 @@ Rules:
 {f"Project Context: {project_context}" if project_context else ""}"""
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.3,
-                max_tokens=500
-            )
+            # Use Google AI Studio API if configured
+            if self.provider == 'google':
+                summary = self._call_google_ai(system_prompt, user_prompt)
+            else:
+                # Use OpenAI-compatible API (Liara or OpenAI)
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=0.3,
+                    max_tokens=500
+                )
+                summary = response.choices[0].message.content
             
-            summary = response.choices[0].message.content
             output_tokens = len(summary) // 4  # Rough estimate
             
             logger.info(f"Summarized {len(messages)} messages: {input_tokens} -> {output_tokens} tokens")
@@ -117,6 +136,38 @@ Rules:
             # Fallback: create a simple concatenated summary
             fallback = self._create_fallback_summary(messages)
             return fallback, input_tokens, len(fallback) // 4
+    
+    def _call_google_ai(self, system_prompt: str, user_prompt: str) -> str:
+        """Call Google AI Studio API directly."""
+        url = f"{self.google_base_url}/models/{self.model}:generateContent"
+        headers = {
+            'Content-Type': 'application/json',
+            'X-goog-api-key': self.google_api_key
+        }
+        
+        # Combine system and user prompts for Google AI format
+        combined_prompt = f"{system_prompt}\n\n{user_prompt}"
+        
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": combined_prompt}
+                    ]
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.3,
+                "maxOutputTokens": 500
+            }
+        }
+        
+        response = requests.post(url, json=payload, headers=headers, timeout=30)
+        response.raise_for_status()
+        
+        result = response.json()
+        summary = result['candidates'][0]['content']['parts'][0]['text']
+        return summary
     
     def _format_messages_for_summary(self, messages: List[Dict[str, Any]]) -> str:
         """Format messages into a readable conversation transcript."""
