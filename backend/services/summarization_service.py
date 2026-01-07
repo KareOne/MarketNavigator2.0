@@ -162,12 +162,29 @@ Rules:
             }
         }
         
-        response = requests.post(url, json=payload, headers=headers, timeout=30)
-        response.raise_for_status()
-        
-        result = response.json()
-        summary = result['candidates'][0]['content']['parts'][0]['text']
-        return summary
+        try:
+            response = requests.post(url, json=payload, headers=headers, timeout=30)
+            response.raise_for_status()
+            
+            result = response.json()
+            
+            # Extract summary from the correct path in response
+            if 'candidates' in result and len(result['candidates']) > 0:
+                candidate = result['candidates'][0]
+                if 'content' in candidate and 'parts' in candidate['content']:
+                    parts = candidate['content']['parts']
+                    if len(parts) > 0 and 'text' in parts[0]:
+                        return parts[0]['text']
+            
+            # Fallback if response structure is unexpected
+            logger.error(f"Unexpected Google AI response structure: {result}")
+            return ""
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Google AI API request failed: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"Response content: {e.response.text}")
+            raise
     
     def _format_messages_for_summary(self, messages: List[Dict[str, Any]]) -> str:
         """Format messages into a readable conversation transcript."""
