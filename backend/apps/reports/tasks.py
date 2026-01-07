@@ -875,8 +875,123 @@ def generate_social_report(self, report_id, user_id):
             logger.error(f"Analysis failed: {e}")
             raise
             raise
+        
+        # =====
+        
+        # Search for top keywords
+        # Using top 3 keywords as requested
+        search_keywords = keywords[:3]
+        tracker.update_step_message('api_search', f"Searching Linkedin for {len(search_keywords)} topics...")
+        
+        all_linkedin_posts = []
+        try:
+            # Run searches sequentially with delay to respect rate limit (5s)
+            results_list = []
+            
+            for i, kw in enumerate(search_keywords):
+                if i > 0:
+                    tracker.update_step_message('api_search', f"Waiting 6s before next search (Rate Limit)...")
+                    # Wait 6s between requests
+                    loop.run_until_complete(asyncio.sleep(6))
+                
+                tracker.update_step_message('api_search', f"Searching for '{kw}'...")
+                
+                try:
+                    res = loop.run_until_complete(
+                        twitter_scraper.search_tweets(
+                            keywords=[kw],
+                            limit=10,
+                            report_id=str(report.id)
+                        )
+                    )
+                    
+                    # Process result immediately
+                    if isinstance(res, dict) and 'tweets' in res:
+                        found_count = len(res['tweets'])
+                        all_tweets.extend(res['tweets'])
+                        
+                        # Prepare detail message and data
+                        message = f"Found {found_count} tweets for '{kw}'"
+                        detail_data = {'keyword': kw, 'count': found_count}
+                        
+                        # Add top tweet info if available (for expandable description)
+                        if res['tweets']:
+                            top_tweet = res['tweets'][0]
+                            author_name = top_tweet.get('author', {}).get('name', 'Unknown')
+                            tweet_text = top_tweet.get('text', '')
+                            
+                            # The frontend likely uses 'description' for expandable content
+                            detail_data['description'] = f"@{author_name}: {tweet_text}"
+                            detail_data['top_tweet_id'] = top_tweet.get('id')
+                            
+                            # Update title to include preview
+                            preview = tweet_text[:50] + "..." if len(tweet_text) > 50 else tweet_text
+                            # Ensure full text is available for frontend expansion
+                            if 'full_text' not in detail_data:
+                                detail_data['full_text'] = tweet_text
+
+                            message += f" - Top: {preview}"
+
+                        tracker.add_step_detail(
+                            'api_search', 
+                            'search_result', 
+                            message, 
+                            detail_data
+                        )
+                    elif isinstance(res, Exception):
+                        logger.warning(f"Search failed for '{kw}': {res}")
+                        tracker.add_step_detail('api_search', 'error', f"Search failed for '{kw}': {str(res)}")
+                    
+                except Exception as e:
+                    logger.error(f"Search failed for '{kw}': {e}")
+                    tracker.add_step_detail('api_search', 'error', f"Search failed for '{kw}': {str(e)}")
+            
+            tracker.update_step_message('api_search', f"Found {len(all_tweets)} unique tweets.")
+            # Dedup tweets by ID
+            seen_ids = set()
+            unique_tweets = []
+            for t in all_tweets:
+                if t['id'] not in seen_ids:
+                    seen_ids.add(t['id'])
+                    unique_tweets.append(t)
+            all_tweets = unique_tweets
+            
+            tracker.update_step_message('api_search', f"Found {len(all_tweets)} unique tweets.")
+            tracker.complete_step('api_search', {'tweets_found': len(all_tweets)})
+            
+            # Save Raw Data
+            try:
+                org_id = str(project.organization_id) if project.organization_id else 'default'
+                report_storage.save_twitter_raw_data(
+                    project_id=str(project.id),
+                    org_id=org_id,
+                    version=report.current_version + 1,
+                    raw_data=all_tweets
+                )
+                logger.info(f"✅ Saved raw Twitter data to S3")
+                
+                # Save to DB (Dual-Write)
+                from .models import ReportRawData
+                ReportRawData.objects.create(
+                    report=report,
+                    version=report.current_version + 1,
+                    report_type='social',
+                    data=all_tweets
+                )
+                logger.info(f"✅ Saved raw Twitter data to DB")
+            except Exception as e:
+                logger.warning(f"Failed to save raw Twitter data: {e}")
+            
+        except Exception as e:
+            logger.error(f"Twitter search failed: {e}")
+            tracker.fail_step('api_search', str(e))
+            raise
+
 
         # ===== Step 4: Save & Generate HTML =====
+        
+        
+        
         tracker.start_step('save')
         
         section_order = 0
