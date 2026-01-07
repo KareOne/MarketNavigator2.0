@@ -354,6 +354,14 @@ METIS_API_KEY = os.getenv('METIS_API_KEY', '')
 METIS_BASE_URL = os.getenv('METIS_BASE_URL', 'https://api.metisai.ir/openai/v1')
 METIS_MODEL = os.getenv('METIS_MODEL', 'gpt-4o-mini')
 
+# =============================================================================
+# CHAT SUMMARIZATION SETTINGS (Token Optimization)
+# Compresses older chat history into summaries to reduce context size
+# =============================================================================
+CHAT_SUMMARY_BATCH_SIZE = int(os.getenv('CHAT_SUMMARY_BATCH_SIZE', '10'))  # Messages per summary batch
+SUMMARIZATION_MODEL = os.getenv('SUMMARIZATION_MODEL', 'google/gemini-2.0-flash')  # Fast/cheap model for summaries
+CHAT_RECENT_MESSAGES_LIMIT = int(os.getenv('CHAT_RECENT_MESSAGES_LIMIT', '10'))  # Keep N recent messages unsummarized
+
 CRUNCHBASE_API_KEY = os.getenv('CRUNCHBASE_API_KEY', '')
 CRUNCHBASE_API_URL = 'https://api.crunchbase.com/api/v4'
 

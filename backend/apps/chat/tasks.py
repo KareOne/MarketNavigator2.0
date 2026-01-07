@@ -1,5 +1,9 @@
 """
 Celery tasks for chat AI processing using Metis AI with function calling.
+
+Includes:
+- process_chat_message: Main chat processing task
+- process_chat_summary: Background task for summarizing old messages
 """
 from celery import shared_task
 from channels.layers import get_channel_layer
@@ -8,6 +12,37 @@ import logging
 import json
 
 logger = logging.getLogger(__name__)
+
+
+@shared_task(bind=True, time_limit=60, soft_time_limit=50)
+def process_chat_summary(self, project_id):
+    """
+    Background task to summarize old chat messages.
+    
+    Called after new messages are added to check if summarization is needed.
+    Uses SummarizationService to compress message batches.
+    """
+    from services.summarization_service import summarization_service
+    
+    logger.info(f"📝 Processing chat summary for project {project_id}")
+    
+    try:
+        result = summarization_service.process_project_backlog(project_id)
+        
+        if result.get('summaries_created', 0) > 0:
+            logger.info(
+                f"✅ Created {result['summaries_created']} summaries, "
+                f"processed {result['messages_processed']} messages, "
+                f"saved ~{result['tokens_saved']} tokens"
+            )
+        else:
+            logger.debug(f"No summarization needed: {result.get('reason', 'unknown')}")
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"❌ Chat summary processing failed: {e}", exc_info=True)
+        raise
 
 
 @shared_task(bind=True, time_limit=120, soft_time_limit=100)
@@ -19,6 +54,7 @@ def process_chat_message(self, project_id, user_id, message, active_modes=None):
     from django.conf import settings
     from services.chat_modes import get_active_modes_config, get_system_prompt_for_modes
     from services.ai_functions import process_function_call
+    from services.summarization_service import summarization_service
     import openai
     
     # Default to empty list if no modes provided
@@ -45,15 +81,18 @@ def process_chat_message(self, project_id, user_id, message, active_modes=None):
         
         logger.info(f"🎯 Active modes: {active_modes}, tools available: {len(tools)}")
         
-        # Get recent chat history (last 20 messages for context)
-        recent_messages = ChatMessage.objects.filter(
-            project_id=project_id
-        ).order_by('-created_at')[:20]
+        # =================================================================
+        # TOKEN OPTIMIZATION: Use summaries + recent messages instead of
+        # loading all recent messages. This reduces context size for long
+        # conversations while preserving important history.
+        # =================================================================
+        max_recent = getattr(settings, 'CHAT_RECENT_MESSAGES_LIMIT', 10)
+        chat_history = summarization_service.build_context_with_summaries(
+            project_id=str(project_id),
+            max_recent_messages=max_recent
+        )
         
-        chat_history = [
-            {"role": "assistant" if m.is_bot else "user", "content": m.message}
-            for m in reversed(recent_messages)
-        ]
+        logger.info(f"📊 Context built: {len(chat_history)} items (summaries + recent messages)")
         
         # Use Metis AI (OpenAI-compatible API)
         metis_api_key = getattr(settings, 'METIS_API_KEY', '')
@@ -218,6 +257,12 @@ def process_chat_message(self, project_id, user_id, message, active_modes=None):
                 'status': 'idle'
             }
         )
+        
+        # =================================================================
+        # TOKEN OPTIMIZATION: Trigger background summarization check
+        # This runs async and won't block the response
+        # =================================================================
+        process_chat_summary.delay(str(project_id))
         
         return {"status": "success", "extracted_fields": extracted_fields}
         
