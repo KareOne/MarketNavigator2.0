@@ -88,6 +88,21 @@ class ReportProgressTracker:
             {'key': 'api_search', 'name': 'AI Analysis', 'description': 'Generating comprehensive market research with AI', 'weight': 80},
             {'key': 'save', 'name': 'Saving Report', 'description': 'Saving report sections', 'weight': 15},
         ],
+        'verdict': [
+            {'key': 'init', 'name': 'Initializing', 'description': 'Gathering prerequisite report data', 'weight': 5},
+            {'key': 'data_audit', 'name': 'Data Classification', 'description': 'Classifying and auditing input datasets', 'weight': 10},
+            {'key': 'executive_synthesis', 'name': 'Executive Synthesis', 'description': 'Generating context overview', 'weight': 10},
+            {'key': 'scoring_demand', 'name': 'Market Demand Scoring', 'description': 'Evaluating market demand axis (25%)', 'weight': 10},
+            {'key': 'scoring_competition', 'name': 'Competition Scoring', 'description': 'Evaluating competitive landscape (20%)', 'weight': 10},
+            {'key': 'scoring_differentiation', 'name': 'Differentiation Scoring', 'description': 'Evaluating unique value proposition (20%)', 'weight': 10},
+            {'key': 'scoring_economics', 'name': 'Economics Scoring', 'description': 'Evaluating economic viability (20%)', 'weight': 10},
+            {'key': 'scoring_feasibility', 'name': 'Feasibility Scoring', 'description': 'Evaluating technical feasibility (15%)', 'weight': 10},
+            {'key': 'risk_synthesis', 'name': 'Risk Synthesis (FMEA)', 'description': 'Discovering and classifying risks', 'weight': 8},
+            {'key': 'verdict_decision', 'name': 'Verdict Decision', 'description': 'Determining GO/ITERATE/KILL verdict', 'weight': 5},
+            {'key': 'roadmap', 'name': 'Actionable Roadmap', 'description': 'Generating 7-day and 30-day sprints', 'weight': 5},
+            {'key': 'html_gen', 'name': 'Generating Report', 'description': 'Creating HTML report', 'weight': 3},
+            {'key': 'save', 'name': 'Saving', 'description': 'Saving report and sections', 'weight': 4},
+        ],
     }
     
     # Number of DB operations before triggering connection cleanup
