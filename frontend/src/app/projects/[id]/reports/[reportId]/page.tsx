@@ -493,7 +493,9 @@ export default function ReportPage() {
                                             {report?.report_type === 'quick_report' ? 'Quick Market Research Report' :
                                                 report?.report_type === 'social' ? 'Social Media Analysis Report' :
                                                     report?.report_type === 'tracxn' ? 'Tracxn Market Report' :
-                                                        'Crunchbase Analysis Report'}
+                                                        report?.report_type === 'verdict' ? 'Verdict Analysis Report' :
+                                                            report?.report_type === 'pitch_deck' ? 'Pitch Deck Report' :
+                                                                'Crunchbase Analysis Report'}
                                         </h1>
                                         <p style={{ margin: "4px 0 0", fontSize: "13px", color: "var(--color-text-muted)" }}>
                                             {project?.name} • {report?.completed_at ? new Date(report.completed_at).toLocaleDateString() : 'In Progress'}

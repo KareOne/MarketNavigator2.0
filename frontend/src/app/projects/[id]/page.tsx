@@ -108,6 +108,7 @@ const REPORT_TYPES = [
     { type: "crunchbase", label: "Crunchbase Analysis", icon: "🔍", description: "Competitor intelligence and funding data" },
     { type: "tracxn", label: "Tracxn Insights", icon: "📊", description: "Startup landscape and market trends" },
     { type: "social", label: "Social Analysis", icon: "📱", description: "Brand mentions and social sentiment" },
+    { type: "verdict", label: "Verdict Analysis", icon: "⚖️", description: "GO/ITERATE/KILL viability assessment" },
     { type: "pitch_deck", label: "Pitch Deck", icon: "🎯", description: "Auto-generated investor pitch deck" },
 ];
 
@@ -538,13 +539,52 @@ export default function ProjectPage() {
         try {
             const res = await fetch(`${API_URL}/api/reports/project/${projectId}/${report.id}/start/`, {
                 method: "POST",
-                headers: { Authorization: `Bearer ${token}` },
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type": "application/json"
+                },
             });
 
+            const responseData = await res.json().catch(() => ({}));
+
+            // Handle verdict warning response (partial data confirmation needed)
+            if (res.ok && responseData.warning && reportType === "verdict") {
+                const confirmProceed = window.confirm(
+                    `⚠️ ${responseData.message}\n\n${responseData.prompt}`
+                );
+
+                if (confirmProceed) {
+                    // Retry with confirm_partial flag
+                    const confirmRes = await fetch(`${API_URL}/api/reports/project/${projectId}/${report.id}/start/`, {
+                        method: "POST",
+                        headers: {
+                            Authorization: `Bearer ${token}`,
+                            "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify({ confirm_partial: true })
+                    });
+
+                    if (!confirmRes.ok) {
+                        const errorData = await confirmRes.json().catch(() => ({}));
+                        setInputValidationMessage(errorData.error || "Failed to start report.");
+                        setTimeout(() => setInputValidationMessage(""), 5000);
+                        return;
+                    }
+
+                    setReports((prev) =>
+                        prev.map((r) =>
+                            r.report_type === reportType
+                                ? { ...r, status: "running", progress: 0, current_step: "Starting..." }
+                                : r
+                        )
+                    );
+                }
+                return;
+            }
+
             if (!res.ok) {
-                const errorData = await res.json().catch(() => ({}));
-                console.error("Failed to start report:", res.status, errorData);
-                setInputValidationMessage(errorData.error || "Failed to start report. Please try again.");
+                console.error("Failed to start report:", res.status, responseData);
+                setInputValidationMessage(responseData.error || "Failed to start report. Please try again.");
                 setTimeout(() => setInputValidationMessage(""), 5000);
                 return;
             }
