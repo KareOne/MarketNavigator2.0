@@ -75,8 +75,8 @@ class SummarizationService:
         Returns:
             Tuple of (summary_text, input_tokens_estimate, output_tokens_estimate)
         """
-        if not self.client:
-            logger.error("SummarizationService: No client available")
+        if not self.provider:
+            logger.error("SummarizationService: No provider configured")
             return "", 0, 0
         
         if not messages:
