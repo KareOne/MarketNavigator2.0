@@ -14,6 +14,7 @@ class Report(models.Model):
         ('crunchbase', 'Crunchbase Analysis'),
         ('tracxn', 'Tracxn Analysis'),
         ('social', 'Social Analysis'),
+        ('verdict', 'Verdict Analysis'),
         ('pitch_deck', 'Pitch Deck'),
     ]
     

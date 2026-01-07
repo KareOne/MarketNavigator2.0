@@ -12,7 +12,7 @@ import logging
 
 from .models import Report, ReportVersion
 from .serializers import ReportSerializer, ReportListSerializer, ReportVersionSerializer
-from .tasks import generate_crunchbase_report, generate_tracxn_report, generate_social_report, generate_pitch_deck, generate_quick_report
+from .tasks import generate_crunchbase_report, generate_tracxn_report, generate_social_report, generate_pitch_deck, generate_quick_report, generate_verdict_report
 from .progress_tracker import ReportProgressTracker
 from apps.projects.models import Project
 
@@ -34,8 +34,8 @@ class ReportViewSet(viewsets.ReadOnlyModelViewSet):
         """List all reports for a project."""
         project = get_object_or_404(Project, id=project_id)
         
-        # Ensure all 4 report types exist
-        report_types = ['quick_report', 'crunchbase', 'tracxn', 'social', 'pitch_deck']
+        # Ensure all report types exist
+        report_types = ['quick_report', 'crunchbase', 'tracxn', 'social', 'verdict', 'pitch_deck']
         for rt in report_types:
             Report.objects.get_or_create(
                 project=project,
@@ -65,6 +65,57 @@ class ReportViewSet(viewsets.ReadOnlyModelViewSet):
                 {"error": "Report is already being generated"},
                 status=status.HTTP_400_BAD_REQUEST
             )
+        
+        # Check dependencies for verdict (requires at least 1 report, warns if not all 3)
+        if report.report_type == 'verdict':
+            crunchbase_completed = Report.objects.filter(
+                project=project, report_type='crunchbase', status='completed'
+            ).exists()
+            tracxn_completed = Report.objects.filter(
+                project=project, report_type='tracxn', status='completed'
+            ).exists()
+            social_completed = Report.objects.filter(
+                project=project, report_type='social', status='completed'
+            ).exists()
+            
+            completed_reports = []
+            missing_reports = []
+            
+            if crunchbase_completed:
+                completed_reports.append('Crunchbase')
+            else:
+                missing_reports.append('Crunchbase')
+            
+            if tracxn_completed:
+                completed_reports.append('Tracxn')
+            else:
+                missing_reports.append('Tracxn')
+            
+            if social_completed:
+                completed_reports.append('Social')
+            else:
+                missing_reports.append('Social')
+            
+            # Require at least 1 completed report
+            if not completed_reports:
+                return Response(
+                    {"error": "Please complete at least one report (Crunchbase, Tracxn, or Social) before generating the Verdict analysis."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # If not all reports are complete, require confirmation
+            if missing_reports:
+                confirm = request.data.get('confirm_partial', False)
+                
+                if not confirm:
+                    return Response({
+                        "warning": True,
+                        "message": f"The following reports are not completed: {', '.join(missing_reports)}. The Verdict analysis will be based only on: {', '.join(completed_reports)}. This may result in a less accurate assessment.",
+                        "completed_reports": completed_reports,
+                        "missing_reports": missing_reports,
+                        "action": "confirm_partial",
+                        "prompt": "Do you want to proceed with partial data?"
+                    }, status=status.HTTP_200_OK)
         
         # Check dependencies for pitch deck
         if report.report_type == 'pitch_deck':
@@ -96,6 +147,7 @@ class ReportViewSet(viewsets.ReadOnlyModelViewSet):
             'crunchbase': generate_crunchbase_report,
             'tracxn': generate_tracxn_report,
             'social': generate_social_report,
+            'verdict': generate_verdict_report,
             'pitch_deck': generate_pitch_deck,
         }
         

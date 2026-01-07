@@ -587,6 +587,220 @@ class HTMLReportGenerator:
         return cls._render_base(content, f"Pitch Deck - {project_name}")
     
     # =========================================================================
+    # Verdict Report Template
+    # =========================================================================
+    
+    @classmethod
+    def generate_verdict_report(cls, data: Dict[str, Any], project_name: str) -> str:
+        """
+        Generate Verdict Analysis HTML report.
+        Structures output from Master Prompt v8.3 analysis.
+        """
+        import markdown
+        
+        executive_synthesis = data.get('executive_synthesis', '')
+        scores = data.get('scores', {})
+        risks = data.get('risks', {})
+        verdict = data.get('verdict', {})
+        roadmap = data.get('roadmap', {})
+        
+        # Calculate total weighted score
+        total_score = verdict.get('total_score', 0)
+        verdict_value = verdict.get('verdict', 'UNKNOWN')
+        
+        # Get verdict badge color
+        verdict_colors = {
+            'GO': ('success', '🟢'),
+            'ITERATE': ('warning', '🟡'),
+            'PARK': ('danger', '🔴'),
+            'KILL': ('danger', '🔴'),
+            'UNKNOWN': ('', '⚪'),
+        }
+        badge_class, verdict_icon = verdict_colors.get(verdict_value.upper() if verdict_value else '', ('', '⚪'))
+        
+        # Convert markdown to HTML for executive synthesis
+        try:
+            exec_html = markdown.markdown(executive_synthesis) if executive_synthesis else ''
+        except Exception:
+            exec_html = executive_synthesis
+        
+        content = f"""
+        <div class="report-header">
+            <h1>⚖️ Verdict Analysis</h1>
+            <div class="report-meta">
+                Project: {project_name} | Analysis Date: {timezone.now().strftime('%B %d, %Y')}
+            </div>
+        </div>
+        
+        <!-- Verdict Decision Banner -->
+        <div class="section" style="text-align: center; padding: 40px;">
+            <div style="font-size: 64px; margin-bottom: 16px;">{verdict_icon}</div>
+            <h2 style="font-size: 36px; margin-bottom: 8px;">{verdict_value}</h2>
+            <div style="font-size: 24px; color: var(--color-text-muted);">
+                Total Score: <strong>{total_score}/100</strong>
+            </div>
+        </div>
+        
+        <!-- Executive Synthesis -->
+        <div class="section">
+            <h2>Executive Synthesis</h2>
+            <div style="line-height: 1.8;">
+                {exec_html}
+            </div>
+        </div>
+        
+        <!-- Quantitative Scoring -->
+        <div class="section">
+            <h2>Quantitative Opportunity Assessment</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Axis</th>
+                        <th>Weight</th>
+                        <th>Score</th>
+                        <th>Confidence</th>
+                    </tr>
+                </thead>
+                <tbody>
+        """
+        
+        axis_weights = {
+            'demand': 25,
+            'competition': 20,
+            'differentiation': 20,
+            'economics': 20,
+            'feasibility': 15,
+        }
+        
+        for axis_name, weight in axis_weights.items():
+            axis_data = scores.get(axis_name, {})
+            score = axis_data.get('score', 'N/A')
+            confidence = axis_data.get('confidence', 'low')
+            
+            # Score color
+            if isinstance(score, (int, float)):
+                if score >= 75:
+                    score_badge = f'<span class="badge badge-success">{score}</span>'
+                elif score >= 50:
+                    score_badge = f'<span class="badge badge-warning">{score}</span>'
+                else:
+                    score_badge = f'<span class="badge badge-danger">{score}</span>'
+            else:
+                score_badge = str(score)
+            
+            content += f"""
+                    <tr>
+                        <td><strong>{axis_name.title()}</strong></td>
+                        <td>{weight}%</td>
+                        <td>{score_badge}</td>
+                        <td>{confidence.title() if isinstance(confidence, str) else confidence}</td>
+                    </tr>
+            """
+        
+        content += f"""
+                    <tr style="background: rgba(24, 54, 97, 0.15); font-weight: bold;">
+                        <td>TOTAL WEIGHTED SCORE</td>
+                        <td>100%</td>
+                        <td><span style="font-size: 18px;">{total_score}</span></td>
+                        <td>-</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Risk Synthesis -->
+        <div class="section">
+            <h2>Risk Synthesis (FMEA)</h2>
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <div class="metric-value" style="color: var(--color-danger);">{risks.get('total_killer_risks', len(risks.get('killer_risks', [])))}</div>
+                    <div class="metric-label">Killer Risks</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value" style="color: var(--color-warning);">{risks.get('total_major_risks', len(risks.get('major_risks', [])))}</div>
+                    <div class="metric-label">Major Risks</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value">{risks.get('total_minor_risks', len(risks.get('minor_risks', [])))}</div>
+                    <div class="metric-label">Minor Risks</div>
+                </div>
+            </div>
+        """
+        
+        # Killer Risks table
+        killer_risks = risks.get('killer_risks', [])
+        if killer_risks and isinstance(killer_risks, list):
+            content += """
+            <h3 style="color: var(--color-danger); margin-top: 24px;">🚨 Killer Risks</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Risk</th>
+                        <th>Sources</th>
+                    </tr>
+                </thead>
+                <tbody>
+            """
+            for risk in killer_risks[:5]:
+                if isinstance(risk, dict):
+                    sources = ', '.join(risk.get('dataset_sources', [])) if isinstance(risk.get('dataset_sources'), list) else 'N/A'
+                    desc = risk.get('description', '')[:150]
+                    content += f"""
+                    <tr>
+                        <td>{risk.get('risk_id', 'K?')}</td>
+                        <td><strong>{risk.get('title', 'Unknown')}</strong><br><small>{desc}</small></td>
+                        <td>{sources}</td>
+                    </tr>
+                    """
+            content += "</tbody></table>"
+        
+        content += "</div>"
+        
+        # Verdict Reasoning
+        verdict_reasoning = verdict.get('verdict_reasoning', '')
+        if verdict_reasoning:
+            content += f"""
+            <div class="section">
+                <h2>Verdict Reasoning</h2>
+                <p style="line-height: 1.8;">{verdict_reasoning}</p>
+            </div>
+            """
+        
+        # Actionable Roadmap
+        content += """
+        <div class="section">
+            <h2>Actionable Roadmap</h2>
+        """
+        
+        # 7-Day Sprint
+        seven_day = roadmap.get('seven_day_sprint', {}) if isinstance(roadmap, dict) else {}
+        if seven_day and isinstance(seven_day, dict):
+            content += f"""
+            <div style="background: rgba(52, 211, 153, 0.1); border-radius: 8px; padding: 20px; margin-bottom: 16px;">
+                <h3 style="margin-bottom: 12px;">🏃 7-Day Sprint</h3>
+                <p><strong>Objective:</strong> {seven_day.get('objective', 'N/A')}</p>
+                <p><strong>Hypothesis:</strong> {seven_day.get('hypothesis_to_test', 'N/A')}</p>
+                <p><strong>Success Criteria:</strong> {seven_day.get('success_criteria', 'N/A')}</p>
+            </div>
+            """
+        
+        # 30-Day Sprint
+        thirty_day = roadmap.get('thirty_day_sprint', {}) if isinstance(roadmap, dict) else {}
+        if thirty_day and isinstance(thirty_day, dict):
+            content += f"""
+            <div style="background: rgba(24, 54, 97, 0.1); border-radius: 8px; padding: 20px;">
+                <h3 style="margin-bottom: 12px;">📅 30-Day Sprint</h3>
+                <p><strong>Objective:</strong> {thirty_day.get('objective', 'N/A')}</p>
+                <p><strong>Moat Focus:</strong> {thirty_day.get('moat_building_focus', 'N/A')}</p>
+            </div>
+            """
+        
+        content += "</div>"
+        
+        return cls._render_base(content, f"Verdict Analysis - {project_name}")
+    
+    # =========================================================================
     # Utility Methods
     # =========================================================================
     
