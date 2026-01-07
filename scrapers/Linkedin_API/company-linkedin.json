@@ -1,0 +1,32 @@
+{
+    "status": "success",
+    "message": "اطلاعات صفحه با موفقیت دریافت شد",
+    "data": {
+        "queue": {
+            "id": 2,
+            "page_name": "microsoft",
+            "status": "completed",
+            "created_at": "2025-11-15 09:52:04",
+            "started_at": "2025-11-15 09:52:31",
+            "completed_at": "2025-11-15 09:53:00",
+            "error_message": null
+        },
+        "page_data": {
+            "id": 1,
+            "page_title": "Microsoft",
+            "page_description": "",
+            "page_overview": "Every company has a mission. What's ours? To empower every person and every organization to achieve more. We believe technology can and should be a force for good and that meaningful innovation contributes to a brighter world in the future and today. Our culture doesn’t just encourage curiosity; it embraces it. Each day we make progress together by showing up as our authentic selves. We show up with a learn-it-all mentality. We show up cheering on others, knowing their success doesn't diminish our own. We show up every day open to learning our own biases, changing our behavior, and inviting in differences. Because impact matters. \n\nMicrosoft operates in 190 countries and is made up of approximately 228,000 passionate employees worldwide.",
+            "company_info": {
+                "industry": "Software Development",
+                "location": "Redmond, Washington",
+                "followers": "27M followers",
+                "employees": "10K+ employees"
+            },
+            "company_link": "https://news.microsoft.com/",
+            "company_phone": "",
+            "company_value": "Business Software, Developer Tools, Home & Educational Software, Tablets, Search, Advertising, Servers, Windows Operating System, Windows Applications & Platforms, Smartphones, Cloud Computing, Quantum Computing, Future of Work, Productivity, AI, Artificial Intelligence, Machine Learning, Laptops, Mixed Reality, Virtual Reality, Gaming, Developers, and IT Professional",
+            "last_post_content": "In October's edition of The Monthly Tech In, we take you behind the scenes of the infrastructure and imagination driving AI forward. From a small Norwegian town becoming Europe's next AI hub to a breakthrough in cooling AI chips, we explore how innovation meets sustainability.\n\nBut it’s not just about machines, it's about the minds behind them. Meet the technologists who helped shape the internet and are now reimagining what AI can do at Microsoft.",
+            "created_at": "2025-11-15 09:53:00"
+        }
+    }
+}

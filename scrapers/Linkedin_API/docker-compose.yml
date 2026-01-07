@@ -1,0 +1,101 @@
+version: "3.9"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: linkedin-api
+    image: linkedin-bot:latest
+    env_file:
+      - .env
+    environment:
+      # Database connection (internal network)
+      MYSQL_HOST: mysql
+      MYSQL_USER: "${MYSQL_USER}"
+      MYSQL_PASSWORD: "${MYSQL_PASSWORD}"
+      MYSQL_DATABASE: "${MYSQL_DATABASE}"
+      MYSQL_PORT: "${MYSQL_PORT}"
+      FLASK_DEBUG: "${FLASK_DEBUG}"
+      
+      # Service info for discovery
+      SERVICE_NAME: linkedin-bot
+      SERVICE_VERSION: "1.0.0"
+      
+      # Chrome/Browser configuration
+      # Set to true for container environments (no display)
+      CHROME_HEADLESS: "true"
+      # Disable undetected-chromedriver network downloads in offline environments
+      USE_UC: "false"
+      
+      # LinkedIn credentials from .env
+      LINKEDIN_USERNAME: "${LINKEDIN_USERNAME}"
+      LINKEDIN_PASSWORD: "${LINKEDIN_PASSWORD}"
+      
+      # Add URLs for other microservices here (example)
+      # AUTH_SERVICE_URL: "http://auth-api:5002"
+      # PAYMENT_SERVICE_URL: "http://payment-api:5003"
+    # ports:
+    #   - "5001:5001"
+    volumes:
+      - ./chrome-profiles:/app/chrome-profiles
+    networks:
+      - linkedin-internal       # Can access mysql
+      - kareone_network                # Default bridge network for internet access
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - 3306:3306
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  mysql:
+    image: mysql:8.0.28
+    container_name: linkedin-mysql
+    command: ["--default-authentication-plugin=mysql_native_password"]
+    env_file:
+      - .env
+    environment:
+      MYSQL_ROOT_PASSWORD: root_pass_123
+      MYSQL_DATABASE: "${MYSQL_DATABASE}"
+      MYSQL_USER: "${MYSQL_USER}"
+      MYSQL_PASSWORD: "${MYSQL_PASSWORD}"
+    ports:
+      - 3306:3306
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - linkedin-internal  # Only accessible by linkedin-api, not other services
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  db_data:
+    name: linkedin-bot-db-data
+
+# External network for microservices communication
+# Create with: docker network create microservices-network
+networks:
+  kareone_network:
+    external: true
+  linkedin-internal:
