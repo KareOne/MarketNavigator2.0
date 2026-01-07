@@ -1896,3 +1896,321 @@ def generate_quick_report(self, report_id, user_id):
                     tracker.fail_step(running_step.step_key, str(e))
         raise
 
+
+@shared_task(bind=True, queue='reports')
+@close_db_wrapper
+def generate_verdict_report(self, report_id, user_id):
+    """
+    Generate Verdict Analysis report using Master Prompt v8.3 pipeline.
+    
+    Dependencies: Crunchbase, Tracxn, and Social reports must be completed.
+    Uses VerdictAnalysisPipeline from services/verdict_analysis.py.
+    """
+    from .models import Report, ReportVersion, ReportAnalysisSection, ReportRawData
+    from .progress_tracker import ReportProgressTracker
+    from apps.users.models import User
+    from services.verdict_analysis import VerdictAnalysisPipeline, generate_verdict_html
+    from services.report_storage import report_storage
+    from core.storage import storage_service
+    from asgiref.sync import sync_to_async
+    import json
+    
+    report = None
+    tracker = None
+    
+    try:
+        report = Report.objects.get(id=report_id)
+        user = User.objects.get(id=user_id)
+        project = report.project
+        inputs = project.inputs
+        
+        # Mark as running
+        report.status = 'running'
+        report.started_at = timezone.now()
+        report.save()
+        
+        # Initialize progress tracker
+        tracker = ReportProgressTracker(report)
+        tracker.initialize_steps()
+        
+        # Get project description for context (include user inputs like other reports)
+        project_input_dict = get_project_inputs_dict(inputs)
+        project_description = f"""
+=== USER PROJECT INPUTS ===
+Startup Name: {inputs.startup_name or project.name}
+Description: {inputs.startup_description or 'Not provided'}
+Target Audience: {inputs.target_audience or 'Not provided'}
+Business Model: {inputs.business_model or 'Not provided'}
+Current Stage: {inputs.current_stage or 'Not provided'}
+Geographic Focus: {inputs.geographic_focus or 'Not provided'}
+Research Goal: {inputs.research_goal or 'Not provided'}
+Time Range: {inputs.time_range or 'Not provided'}
+Inspiration Sources: {inputs.inspiration_sources or 'Not provided'}
+Target Description: {inputs.target_description or 'Not provided'}
+"""
+        
+        # ===== Step 1: Initialize & Gather Available Prerequisite Data =====
+        tracker.start_step('init')
+        tracker.update_step_message('init', "Loading available report data...")
+        
+        # Fetch raw data from completed reports (some may not exist)
+        crunchbase_raw = ReportRawData.objects.filter(
+            report__project=project, 
+            report__report_type='crunchbase'
+        ).order_by('-version').first()
+        
+        tracxn_raw = ReportRawData.objects.filter(
+            report__project=project, 
+            report__report_type='tracxn'
+        ).order_by('-version').first()
+        
+        social_raw = ReportRawData.objects.filter(
+            report__project=project, 
+            report__report_type='social'
+        ).order_by('-version').first()
+        
+        # Extract data or use empty lists for missing reports
+        crunchbase_data = crunchbase_raw.data if crunchbase_raw else []
+        tracxn_data = tracxn_raw.data if tracxn_raw else []
+        social_data = social_raw.data if social_raw else []
+        
+        # Track which data sources are available
+        available_sources = []
+        missing_sources = []
+        
+        if crunchbase_raw and crunchbase_data:
+            available_sources.append('Crunchbase')
+            count = len(crunchbase_data) if isinstance(crunchbase_data, list) else 1
+            tracker.add_step_detail('init', 'data_loaded', f"✓ Crunchbase: {count} companies")
+        else:
+            missing_sources.append('Crunchbase')
+            tracker.add_step_detail('init', 'data_missing', "✗ Crunchbase: No data available")
+        
+        if tracxn_raw and tracxn_data:
+            available_sources.append('Tracxn')
+            count = len(tracxn_data) if isinstance(tracxn_data, list) else 1
+            tracker.add_step_detail('init', 'data_loaded', f"✓ Tracxn: {count} startups")
+        else:
+            missing_sources.append('Tracxn')
+            tracker.add_step_detail('init', 'data_missing', "✗ Tracxn: No data available")
+        
+        if social_raw and social_data:
+            available_sources.append('Social')
+            count = len(social_data) if isinstance(social_data, list) else 1
+            tracker.add_step_detail('init', 'data_loaded', f"✓ Social: {count} posts")
+        else:
+            missing_sources.append('Social')
+            tracker.add_step_detail('init', 'data_missing', "✗ Social: No data available")
+        
+        # Require at least one data source
+        if not available_sources:
+            raise Exception("No report data available. Please complete at least one report (Crunchbase, Tracxn, or Social) first.")
+        
+        # Add data availability context to project description
+        project_description += f"""
+=== DATA SOURCES ===
+Available: {', '.join(available_sources) if available_sources else 'None'}
+Missing: {', '.join(missing_sources) if missing_sources else 'None'}
+Note: Analysis will be based only on available data sources. Missing data will result in lower confidence scores.
+"""
+        
+        tracker.complete_step('init', {
+            'available_sources': available_sources,
+            'missing_sources': missing_sources,
+            'crunchbase_count': len(crunchbase_data) if isinstance(crunchbase_data, list) else 0,
+            'tracxn_count': len(tracxn_data) if isinstance(tracxn_data, list) else 0,
+            'social_count': len(social_data) if isinstance(social_data, list) else 0,
+        })
+        
+        # ===== Run Analysis Pipeline =====
+        # Create async tracker wrapper for pipeline
+        class AsyncTracker:
+            def __init__(self, sync_tracker):
+                self.tracker = sync_tracker
+            
+            async def start_step(self, *args, **kwargs):
+                await sync_to_async(self.tracker.start_step)(*args, **kwargs)
+            
+            async def update_step_message(self, *args, **kwargs):
+                await sync_to_async(self.tracker.update_step_message)(*args, **kwargs)
+            
+            async def add_step_detail(self, *args, **kwargs):
+                await sync_to_async(self.tracker.add_step_detail)(*args, **kwargs)
+            
+            async def complete_step(self, *args, **kwargs):
+                await sync_to_async(self.tracker.complete_step)(*args, **kwargs)
+            
+            async def fail_step(self, *args, **kwargs):
+                await sync_to_async(self.tracker.fail_step)(*args, **kwargs)
+        
+        async_tracker = AsyncTracker(tracker)
+        
+        # Initialize and run pipeline
+        pipeline = VerdictAnalysisPipeline(
+            project_description=project_description
+        )
+        
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            analysis_result = loop.run_until_complete(
+                pipeline.analyze(
+                    crunchbase_data=crunchbase_data,
+                    tracxn_data=tracxn_data,
+                    social_data=social_data,
+                    tracker=async_tracker
+                )
+            )
+        finally:
+            loop.close()
+        
+        # Extract results
+        scores = analysis_result.get('scores', {})
+        risks = analysis_result.get('risks', {})
+        verdict = analysis_result.get('verdict', {})
+        roadmap = analysis_result.get('roadmap', {})
+        
+        # ===== Generate HTML Report =====
+        tracker.start_step('html_gen')
+        tracker.update_step_message('html_gen', "Generating HTML report...")
+        
+        html_content = generate_verdict_html(
+            analysis_result,
+            inputs.startup_name or project.name
+        )
+        
+        tracker.complete_step('html_gen', {'html_size': len(html_content)})
+        
+        # ===== Save Report =====
+        tracker.start_step('save')
+        tracker.update_step_message('save', "Saving report to database and S3...")
+        
+        section_order = 0
+        org_id = str(project.organization_id) if project.organization_id else 'default'
+        
+        # Define sections to save
+        sections_to_save = [
+            ('executive_synthesis', 'Executive Synthesis', analysis_result.get('executive_synthesis', '')),
+            ('scoring_demand', 'Market Demand Score', json.dumps(scores.get('demand', {}), indent=2)),
+            ('scoring_competition', 'Competition Score', json.dumps(scores.get('competition', {}), indent=2)),
+            ('scoring_differentiation', 'Differentiation Score', json.dumps(scores.get('differentiation', {}), indent=2)),
+            ('scoring_economics', 'Economics Score', json.dumps(scores.get('economics', {}), indent=2)),
+            ('scoring_feasibility', 'Feasibility Score', json.dumps(scores.get('feasibility', {}), indent=2)),
+            ('risk_synthesis', 'Risk Synthesis (FMEA)', json.dumps(risks, indent=2)),
+            ('verdict_decision', 'Verdict Decision', json.dumps(verdict, indent=2)),
+            ('roadmap', 'Actionable Roadmap', json.dumps(roadmap, indent=2)),
+        ]
+        
+        # Save each section to DB
+        for section_type, section_name, content in sections_to_save:
+            ReportAnalysisSection.objects.create(
+                report=report,
+                section_type=section_type,
+                content_markdown=content if isinstance(content, str) else json.dumps(content, indent=2),
+                order=section_order
+            )
+            section_order += 1
+            
+            # Save to S3
+            try:
+                report_storage.save_analysis_section(
+                    project_id=str(project.id),
+                    org_id=org_id,
+                    version=report.current_version + 1,
+                    section_type=section_type,
+                    content=content if isinstance(content, str) else json.dumps(content, indent=2),
+                    report_type='verdict'
+                )
+            except Exception as e:
+                logger.warning(f"S3 save failed for {section_type}: {e}")
+        
+        # Save to S3 HTML
+        if getattr(settings, 'USE_S3', False):
+            try:
+                storage_service.upload_report(
+                    org_id=org_id,
+                    project_id=str(project.id),
+                    report_type='verdict',
+                    report_id=str(report.id),
+                    content=html_content.encode(),
+                    file_type='html'
+                )
+            except Exception as e:
+                logger.warning(f"S3 HTML upload failed: {e}")
+        
+        # Create version
+        report.current_version += 1
+        ReportVersion.objects.create(
+            report=report,
+            version_number=report.current_version,
+            html_content=html_content,
+            data_snapshot={
+                'verdict': verdict.get('verdict', 'UNKNOWN'),
+                'total_score': verdict.get('total_score', 0),
+                'killer_risks': risks.get('total_killer_risks', 0),
+                'sections_count': section_order
+            },
+            changes_summary=f"Verdict: {verdict.get('verdict', 'UNKNOWN')} (Score: {verdict.get('total_score', 0)})",
+            generated_by=user
+        )
+        
+        # Finalize report
+        report.status = 'completed'
+        report.progress = 100
+        report.current_step = 'Complete!'
+        report.html_content = html_content
+        report.data = {
+            'verdict': verdict.get('verdict', 'UNKNOWN'),
+            'total_score': verdict.get('total_score', 0),
+            'killer_risks': risks.get('total_killer_risks', 0),
+            'major_risks': risks.get('total_major_risks', 0),
+            'sections_count': section_order
+        }
+        report.completed_at = timezone.now()
+        report.save()
+        
+        # Save report metadata JSON
+        try:
+            report_storage.save_report_metadata(
+                project_id=str(project.id),
+                org_id=org_id,
+                version=report.current_version,
+                metadata={
+                    'report_id': str(report.id),
+                    'project_id': str(project.id),
+                    'org_id': org_id,
+                    'verdict': verdict.get('verdict'),
+                    'total_score': verdict.get('total_score'),
+                    'killer_risks': risks.get('total_killer_risks', 0),
+                    'major_risks': risks.get('total_major_risks', 0),
+                    'sections_count': section_order,
+                    'generated_at': report.completed_at.isoformat() if report.completed_at else None,
+                    'version': report.current_version,
+                    'status': 'success'
+                },
+                report_type='verdict'
+            )
+            logger.info(f"✅ Saved Verdict report metadata for project {project.id}")
+        except Exception as e:
+            logger.warning(f"Failed to save Verdict report metadata: {e}")
+        
+        tracker.complete_step('save', {'version': report.current_version, 'sections': section_order})
+        
+        logger.info(f"✅ Verdict report generated for project {project.id}: {verdict.get('verdict', 'UNKNOWN')}")
+        return {"status": "success", "verdict": verdict.get('verdict'), "score": verdict.get('total_score')}
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to generate Verdict report: {e}")
+        if report:
+            report.status = 'failed'
+            report.error_message = str(e)
+            report.save()
+            if tracker:
+                from .models import ReportProgressStep
+                running_step = ReportProgressStep.objects.filter(
+                    report=report, status='running'
+                ).first()
+                if running_step:
+                    tracker.fail_step(running_step.step_key, str(e))
+        raise

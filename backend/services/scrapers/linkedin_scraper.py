@@ -22,7 +22,7 @@ class LinkedinScraperClient(RetryableScraperClient):
     
     def __init__(self):
         # Base URL for local service (if ever needed fallback)
-        base_url = getattr(settings, 'LINKEDIN_SCRAPER_URL', 'http://linkedin_api:8004')
+        base_url = getattr(settings, 'LINKEDIN_SCRAPER_URL', 'http://172.17.0.1:5001')
         
         super().__init__(
             service_name='linkedin_scraper',

@@ -96,6 +96,21 @@ class TimeEstimator:
             'api_search': 45,       # AI generation takes ~30-60 seconds
             'save': 5,              # Saving sections
         },
+        'verdict': {
+            'init': 5,              # Loading prerequisite data
+            'data_audit': 15,       # Dataset classification
+            'executive_synthesis': 30,  # Context overview generation
+            'scoring_demand': 25,   # Market demand axis analysis
+            'scoring_competition': 25,  # Competition axis analysis
+            'scoring_differentiation': 25,  # Differentiation axis analysis
+            'scoring_economics': 25,    # Economics axis analysis
+            'scoring_feasibility': 25,  # Feasibility axis analysis
+            'risk_synthesis': 30,   # FMEA risk discovery
+            'verdict_decision': 15, # GO/ITERATE/KILL determination
+            'roadmap': 20,          # 7-day and 30-day sprint generation
+            'html_gen': 5,          # HTML report generation
+            'save': 5,              # Saving to DB and S3
+        },
     }
     
     def __init__(self, report_type: str):
