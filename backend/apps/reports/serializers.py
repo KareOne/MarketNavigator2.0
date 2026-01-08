@@ -50,6 +50,14 @@ class ReportVersionSerializer(serializers.ModelSerializer):
         return None
 
 
+class ReportVersionListSerializer(serializers.ModelSerializer):
+    """Lightweight serializer for version dropdown list."""
+    
+    class Meta:
+        model = ReportVersion
+        fields = ['id', 'version_number', 'generated_at', 'changes_summary']
+
+
 class ReportSerializer(serializers.ModelSerializer):
     """Serializer for reports."""
     
@@ -85,6 +93,7 @@ class ReportListSerializer(serializers.ModelSerializer):
     
     is_outdated = serializers.SerializerMethodField()
     progress_steps = ReportProgressStepSerializer(many=True, read_only=True)
+    versions = serializers.SerializerMethodField()
     
     class Meta:
         model = Report
@@ -92,9 +101,14 @@ class ReportListSerializer(serializers.ModelSerializer):
             'id', 'report_type', 'status', 'current_version',
             'progress', 'current_step', 'is_outdated',
             'progress_steps', 'html_content',  # Added html_content for View Report button
+            'versions',  # Version history for dropdown
             'completed_at', 'updated_at'
         ]
     
     def get_is_outdated(self, obj):
         return obj.check_if_outdated()
-
+    
+    def get_versions(self, obj):
+        """Return version history for dropdown (excluding current version if only 1)."""
+        versions = obj.versions.all().order_by('-version_number')
+        return ReportVersionListSerializer(versions, many=True).data

@@ -12,6 +12,30 @@ import json
 from typing import Dict, Any, List, Optional
 
 
+def safe_slice(data: Any, count: int) -> List:
+    """Safely slice data, handling non-list types and empty data."""
+    if not data:
+        return []
+    if isinstance(data, list):
+        return data[:count]
+    if isinstance(data, dict):
+        return [data]  # Wrap dict in list
+    return []
+
+
+def safe_json_dump(data: Any, max_chars: int = 3000) -> str:
+    """Safely dump data to JSON with character limit."""
+    try:
+        if not data:
+            return "No data available"
+        result = json.dumps(data, indent=2, default=str)
+        if len(result) > max_chars:
+            return result[:max_chars] + "\n... (truncated)"
+        return result
+    except Exception as e:
+        return f"Error serializing data: {str(e)}"
+
+
 class VerdictPromptTemplates:
     """
     Container for Verdict Analysis prompts.
@@ -52,6 +76,11 @@ Generic startup advice, intuition, or pattern-matching is **strictly forbidden**
         Generate prompt for internal data audit and classification.
         This phase classifies datasets into their functional roles.
         """
+        # Safely get data lengths
+        cb_count = len(crunchbase_data) if isinstance(crunchbase_data, list) else (1 if crunchbase_data else 0)
+        tx_count = len(tracxn_data) if isinstance(tracxn_data, list) else (1 if tracxn_data else 0)
+        sc_count = len(social_data) if isinstance(social_data, list) else (1 if social_data else 0)
+        
         return f"""You are performing an internal data audit for a venture viability analysis.
 
 **PROJECT CONTEXT**:
@@ -59,17 +88,14 @@ Generic startup advice, intuition, or pattern-matching is **strictly forbidden**
 
 **DATASETS PROVIDED**:
 
-1. CRUNCHBASE DATA ({len(crunchbase_data)} companies):
-{json.dumps(crunchbase_data[:3], indent=2, default=str)[:3000]}
-{"... (truncated)" if len(crunchbase_data) > 3 else ""}
+1. CRUNCHBASE DATA ({cb_count} companies):
+{safe_json_dump(safe_slice(crunchbase_data, 3), 3000)}
 
-2. TRACXN DATA ({len(tracxn_data)} startups):
-{json.dumps(tracxn_data[:3], indent=2, default=str)[:3000]}
-{"... (truncated)" if len(tracxn_data) > 3 else ""}
+2. TRACXN DATA ({tx_count} startups):
+{safe_json_dump(safe_slice(tracxn_data, 3), 3000)}
 
-3. SOCIAL DATA ({len(social_data) if isinstance(social_data, list) else 'N/A'} posts):
-{json.dumps(social_data[:5] if isinstance(social_data, list) else social_data, indent=2, default=str)[:2000]}
-{"... (truncated)" if isinstance(social_data, list) and len(social_data) > 5 else ""}
+3. SOCIAL DATA ({sc_count} posts):
+{safe_json_dump(safe_slice(social_data, 5), 2000)}
 
 **TASK**:
 Classify each dataset by its functional role:
@@ -126,7 +152,7 @@ Output as structured JSON:
 - Social: {len(social_data) if isinstance(social_data, list) else 'Aggregated'} demand signals
 
 **CLASSIFICATION CONTEXT** (from internal audit):
-{json.dumps(data_classification, indent=2) if data_classification else "Not available"}
+{safe_json_dump(data_classification, 2000) if data_classification else "Not available"}
 
 **TASK**:
 Write a compelling Executive Synthesis (300-500 words) that:
@@ -241,14 +267,14 @@ Score Drivers:
 **PROJECT CONTEXT**:
 {project_description if project_description else "Discover from datasets."}
 
-**COMPETITIVE DATA (Crunchbase - {len(crunchbase_data)} companies)**:
-{json.dumps(crunchbase_data[:5], indent=2, default=str)[:4000]}
+**COMPETITIVE DATA (Crunchbase - {len(crunchbase_data) if isinstance(crunchbase_data, list) else 0} companies)**:
+{safe_json_dump(safe_slice(crunchbase_data, 5), 4000)}
 
-**STARTUP ECOSYSTEM DATA (Tracxn - {len(tracxn_data)} startups)**:
-{json.dumps(tracxn_data[:5], indent=2, default=str)[:4000]}
+**STARTUP ECOSYSTEM DATA (Tracxn - {len(tracxn_data) if isinstance(tracxn_data, list) else 0} startups)**:
+{safe_json_dump(safe_slice(tracxn_data, 5), 4000)}
 
-**DEMAND SIGNALS (Social - {len(social_data) if isinstance(social_data, list) else 'N/A'} items)**:
-{json.dumps(social_data[:10] if isinstance(social_data, list) else social_data, indent=2, default=str)[:3000]}
+**DEMAND SIGNALS (Social - {len(social_data) if isinstance(social_data, list) else 0} items)**:
+{safe_json_dump(safe_slice(social_data, 10), 3000)}
 
 **TASK**:
 Provide a score from 0-100 for this axis with detailed reasoning.
@@ -288,19 +314,19 @@ Provide a score from 0-100 for this axis with detailed reasoning.
 You must **discover risks** by identifying contradictions across datasets.
 
 **AXIS SCORES** (from previous analysis):
-{json.dumps(scores, indent=2)}
+{safe_json_dump(scores, 2000)}
 
 **PROJECT CONTEXT**:
 {project_description if project_description else "Discover from datasets."}
 
 **COMPETITIVE DATA (Crunchbase)**:
-{json.dumps(crunchbase_data[:3], indent=2, default=str)[:2500]}
+{safe_json_dump(safe_slice(crunchbase_data, 3), 2500)}
 
 **STARTUP ECOSYSTEM DATA (Tracxn)**:
-{json.dumps(tracxn_data[:3], indent=2, default=str)[:2500]}
+{safe_json_dump(safe_slice(tracxn_data, 3), 2500)}
 
 **DEMAND SIGNALS (Social)**:
-{json.dumps(social_data[:5] if isinstance(social_data, list) else social_data, indent=2, default=str)[:2000]}
+{safe_json_dump(safe_slice(social_data, 5), 2000)}
 
 **RISK CLASSES**:
 1. **Killer Risks**: Structural blockers that make success nearly impossible
@@ -371,10 +397,10 @@ Discover 5-10 risks by analyzing contradictions between:
    - OR ≥ 1 Killer Risk present
 
 **AXIS SCORES**:
-{json.dumps(scores, indent=2)}
+{safe_json_dump(scores, 2000)}
 
 **RISK SUMMARY**:
-{json.dumps(risks, indent=2)}
+{safe_json_dump(risks, 2000)}
 
 **PROJECT CONTEXT**:
 {project_description if project_description else "From datasets."}
@@ -430,10 +456,10 @@ Discover 5-10 risks by analyzing contradictions between:
 **TOTAL SCORE**: {verdict.get('total_score', 'N/A')}
 
 **LOWEST SCORING AXES** (prioritize these):
-{json.dumps(scores, indent=2)}
+{safe_json_dump(scores, 2000)}
 
 **HIGHEST PRIORITY RISKS**:
-{json.dumps(risks, indent=2)}
+{safe_json_dump(risks, 2000)}
 
 **PROJECT CONTEXT**:
 {project_description if project_description else "From datasets."}

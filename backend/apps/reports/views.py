@@ -202,7 +202,73 @@ class ReportViewSet(viewsets.ReadOnlyModelViewSet):
             "v2": ReportVersionSerializer(version2).data,
         })
     
-    def _get_sections_with_fallback(self, report):
+    @action(detail=True, methods=['post'])
+    def restart(self, request, project_id=None, pk=None):
+        """
+        Restart a completed/failed report.
+        - Clears progress steps and analysis sections (not versions)
+        - Resets status and starts a fresh generation
+        - The new report will become a new version when complete
+        """
+        from .models import ReportProgressStep, ReportAnalysisSection
+        
+        report = self.get_object()
+        project = report.project
+        
+        # Only allow restart on completed or failed reports
+        if report.status not in ['completed', 'failed']:
+            return Response(
+                {"error": f"Cannot restart a report with status '{report.status}'. Report must be completed or failed."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Check inputs are complete
+        if project.inputs.completion_status != 'complete':
+            return Response(
+                {"error": "Please complete all project inputs first"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        logger.info(f"🔄 Restarting report {report.id} (current version: {report.current_version})")
+        
+        # Clear current run's progress steps and analysis sections
+        # (versions are preserved, these are for the current generation)
+        deleted_steps = ReportProgressStep.objects.filter(report=report).delete()
+        deleted_sections = ReportAnalysisSection.objects.filter(report=report).delete()
+        logger.info(f"🧹 Cleared {deleted_steps[0]} progress steps and {deleted_sections[0]} analysis sections")
+        
+        # Reset report status for new generation
+        report.status = 'running'
+        report.progress = 0
+        report.current_step = 'Starting...'
+        report.error_message = ''
+        report.started_at = timezone.now()
+        report.completed_at = None
+        report.inputs_hash = project.inputs.get_inputs_hash()
+        # Note: Don't reset current_version - it will be incremented when new version is saved
+        report.save()
+        
+        # Start background task
+        task_map = {
+            'quick_report': generate_quick_report,
+            'crunchbase': generate_crunchbase_report,
+            'tracxn': generate_tracxn_report,
+            'social': generate_social_report,
+            'verdict': generate_verdict_report,
+            'pitch_deck': generate_pitch_deck,
+        }
+        
+        task = task_map.get(report.report_type)
+        if task:
+            task.delay(str(report.id), str(request.user.id))
+        
+        return Response({
+            "message": f"{report.get_report_type_display()} restart initiated",
+            "report_id": str(report.id),
+            "previous_version": report.current_version
+        })
+    
+    def _get_sections_with_fallback(self, report, version=None):
         """
         Helper to get sections from S3, falling back to DB if missing.
         Preserves the structure expected by frontend (grouping companies).
@@ -213,12 +279,15 @@ class ReportViewSet(viewsets.ReadOnlyModelViewSet):
         project = report.project
         org_id = str(project.organization_id) if project.organization_id else 'default'
         
+        # Use provided version or default to current
+        target_version = version if version is not None else report.current_version
+        
         # 1. Try S3
         try:
             sections_data = report_storage.get_all_sections(
                 project_id=str(project.id),
                 org_id=org_id,
-                version=report.current_version,
+                version=target_version,
                 report_type=report.report_type
             )
             if sections_data.get('sections'):
@@ -299,12 +368,37 @@ class ReportViewSet(viewsets.ReadOnlyModelViewSet):
     def sections(self, request, project_id=None, pk=None):
         """
         Get report sections. Tries S3, falls back to DB.
+        Accepts optional 'version' query param to fetch a specific version.
         """
         report = self.get_object()
-        logger.info(f"📖 Fetching sections for report {report.id} (v{report.current_version})")
+        
+        # Get optional version parameter
+        version_param = request.query_params.get('version')
+        version = None
+        if version_param:
+            try:
+                version = int(version_param)
+                # Validate version exists
+                if not report.versions.filter(version_number=version).exists():
+                    return Response(
+                        {"error": f"Version {version} not found"},
+                        status=status.HTTP_404_NOT_FOUND
+                    )
+            except ValueError:
+                return Response(
+                    {"error": "Invalid version number"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+        target_version = version if version is not None else report.current_version
+        logger.info(f"📖 Fetching sections for report {report.id} (v{target_version})")
         
         try:
-            sections_data = self._get_sections_with_fallback(report)
+            sections_data = self._get_sections_with_fallback(report, version=target_version)
+            # Include version info in response
+            sections_data['version'] = target_version
+            sections_data['current_version'] = report.current_version
+            sections_data['is_latest'] = (target_version == report.current_version)
             return Response(sections_data)
         except Exception as e:
             logger.error(f"❌ Error fetching sections: {e}")

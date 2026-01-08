@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { useRouter, useParams } from "next/navigation";
+import { useRouter, useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -45,8 +45,13 @@ export default function ReportPage() {
     const { token, isAuthenticated, isLoading: authLoading } = useAuth();
     const router = useRouter();
     const params = useParams();
+    const searchParams = useSearchParams();
     const projectId = params.id as string;
     const reportId = params.reportId as string;
+
+    // Get version from query param (e.g., ?version=1)
+    const versionParam = searchParams.get('version');
+    const requestedVersion = versionParam ? parseInt(versionParam, 10) : null;
 
     const [project, setProject] = useState<Project | null>(null);
     const [report, setReport] = useState<Report | null>(null);
@@ -56,6 +61,11 @@ export default function ReportPage() {
     const [newMessage, setNewMessage] = useState("");
     const [isTyping, setIsTyping] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
+
+    // Version display state
+    const [viewingVersion, setViewingVersion] = useState<number | null>(null);
+    const [currentVersion, setCurrentVersion] = useState<number>(0);
+    const [isLatestVersion, setIsLatestVersion] = useState<boolean>(true);
 
     // Collapsible states
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -148,11 +158,16 @@ export default function ReportPage() {
                 if (currentReport) {
                     setReport(currentReport);
 
+                    // Build sections URL with optional version param
+                    let sectionsUrl = `${API_URL}/api/reports/project/${projectId}/${reportId}/sections/`;
+                    if (requestedVersion !== null) {
+                        sectionsUrl += `?version=${requestedVersion}`;
+                    }
+
                     // Fetch structured sections from API
-                    const sectionsRes = await fetch(
-                        `${API_URL}/api/reports/project/${projectId}/${reportId}/sections/`,
-                        { headers: { Authorization: `Bearer ${token}` } }
-                    );
+                    const sectionsRes = await fetch(sectionsUrl, {
+                        headers: { Authorization: `Bearer ${token}` }
+                    });
 
                     if (sectionsRes.ok) {
                         const sectionsData = await sectionsRes.json();
@@ -160,6 +175,10 @@ export default function ReportPage() {
                             setSections(sectionsData.sections);
                             setActiveSection(sectionsData.sections[0].id);
                         }
+                        // Set version display state from API response
+                        setViewingVersion(sectionsData.version || currentReport.current_version);
+                        setCurrentVersion(sectionsData.current_version || currentReport.current_version);
+                        setIsLatestVersion(sectionsData.is_latest !== false);
                     }
                 }
             }
@@ -493,11 +512,45 @@ export default function ReportPage() {
                                             {report?.report_type === 'quick_report' ? 'Quick Market Research Report' :
                                                 report?.report_type === 'social' ? 'Social Media Analysis Report' :
                                                     report?.report_type === 'tracxn' ? 'Tracxn Market Report' :
-                                                        'Crunchbase Analysis Report'}
+                                                        report?.report_type === 'verdict' ? 'Verdict Analysis Report' :
+                                                            report?.report_type === 'pitch_deck' ? 'Pitch Deck Report' :
+                                                                'Crunchbase Analysis Report'}
                                         </h1>
-                                        <p style={{ margin: "4px 0 0", fontSize: "13px", color: "var(--color-text-muted)" }}>
-                                            {project?.name} • {report?.completed_at ? new Date(report.completed_at).toLocaleDateString() : 'In Progress'}
-                                        </p>
+                                        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "4px" }}>
+                                            <p style={{ margin: 0, fontSize: "13px", color: "var(--color-text-muted)" }}>
+                                                {project?.name} • {report?.completed_at ? new Date(report.completed_at).toLocaleDateString() : 'In Progress'}
+                                            </p>
+                                            {/* Version badge when viewing old version */}
+                                            {!isLatestVersion && viewingVersion && (
+                                                <>
+                                                    <span style={{
+                                                        padding: "2px 8px",
+                                                        background: "var(--color-warning)",
+                                                        color: "#fff",
+                                                        borderRadius: "var(--radius-sm)",
+                                                        fontSize: "10px",
+                                                        fontWeight: 600
+                                                    }}>
+                                                        Viewing v{viewingVersion}
+                                                    </span>
+                                                    <button
+                                                        onClick={() => router.push(`/projects/${projectId}/reports/${reportId}`)}
+                                                        style={{
+                                                            padding: "2px 8px",
+                                                            background: "var(--color-primary)",
+                                                            border: "none",
+                                                            borderRadius: "var(--radius-sm)",
+                                                            color: "#fff",
+                                                            cursor: "pointer",
+                                                            fontSize: "10px",
+                                                            fontWeight: 500
+                                                        }}
+                                                    >
+                                                        View Latest (v{currentVersion})
+                                                    </button>
+                                                </>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
 

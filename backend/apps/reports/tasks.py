@@ -2089,17 +2089,138 @@ Note: Analysis will be based only on available data sources. Missing data will r
         section_order = 0
         org_id = str(project.organization_id) if project.organization_id else 'default'
         
-        # Define sections to save
+        # Helper function to convert score data to markdown
+        def format_score_to_markdown(axis_name: str, score_data: dict) -> str:
+            """Convert a scoring axis JSON to readable markdown."""
+            if not score_data or not isinstance(score_data, dict):
+                return f"No data available for {axis_name}"
+            
+            score = score_data.get('score', 'N/A')
+            confidence = score_data.get('confidence', 'low')
+            classification = score_data.get('classification', 'Unknown')
+            reasoning = score_data.get('reasoning', 'No reasoning provided.')
+            key_evidence = score_data.get('key_evidence', [])
+            data_gaps = score_data.get('data_gaps', [])
+            implications = score_data.get('implications', '')
+            
+            md = f"""## {axis_name.title()} Assessment
+
+**Score:** {score}/100 | **Confidence:** {confidence.title() if isinstance(confidence, str) else confidence} | **Classification:** {classification}
+
+### Reasoning
+{reasoning}
+
+"""
+            if key_evidence:
+                md += "### Key Evidence\n"
+                for ev in key_evidence[:5] if isinstance(key_evidence, list) else []:
+                    md += f"- {ev}\n"
+                md += "\n"
+            
+            if data_gaps:
+                md += "### Data Gaps\n"
+                for gap in data_gaps[:5] if isinstance(data_gaps, list) else []:
+                    md += f"- {gap}\n"
+                md += "\n"
+            
+            if implications:
+                md += f"### Implications\n{implications}\n"
+            
+            return md
+        
+        def format_risks_to_markdown(risks_data: dict) -> str:
+            """Convert risks JSON to readable markdown."""
+            if not risks_data or not isinstance(risks_data, dict):
+                return "No risk data available."
+            
+            killer = risks_data.get('killer_risks', [])
+            major = risks_data.get('major_risks', [])
+            minor = risks_data.get('minor_risks', [])
+            
+            md = f"""## Risk Synthesis (FMEA)
+
+**Summary:** {len(killer) if isinstance(killer, list) else 0} Killer | {len(major) if isinstance(major, list) else 0} Major | {len(minor) if isinstance(minor, list) else 0} Minor
+
+"""
+            if killer and isinstance(killer, list):
+                md += "### 🚨 Killer Risks\n"
+                for risk in killer[:5]:
+                    if isinstance(risk, dict):
+                        md += f"**{risk.get('risk_id', 'K?')}: {risk.get('title', 'Unknown')}**\n"
+                        md += f"{risk.get('description', 'No description')}\n\n"
+            
+            if major and isinstance(major, list):
+                md += "### ⚠️ Major Risks\n"
+                for risk in major[:5]:
+                    if isinstance(risk, dict):
+                        md += f"**{risk.get('risk_id', 'M?')}: {risk.get('title', 'Unknown')}**\n"
+                        md += f"{risk.get('description', 'No description')}\n\n"
+            
+            return md
+        
+        def format_verdict_to_markdown(verdict_data: dict) -> str:
+            """Convert verdict JSON to readable markdown."""
+            if not verdict_data or not isinstance(verdict_data, dict):
+                return "No verdict data available."
+            
+            verdict = verdict_data.get('verdict', 'UNKNOWN')
+            total_score = verdict_data.get('total_score', 0)
+            reasoning = verdict_data.get('verdict_reasoning', '')
+            
+            verdict_emoji = {'GO': '🟢', 'ITERATE': '🟡', 'PARK': '🔴', 'KILL': '🔴'}.get(str(verdict).upper(), '⚪')
+            
+            md = f"""## Verdict Decision
+
+# {verdict_emoji} {verdict}
+
+**Total Weighted Score:** {total_score}/100
+
+### Reasoning
+{reasoning if reasoning else 'See detailed analysis above.'}
+"""
+            return md
+        
+        def format_roadmap_to_markdown(roadmap_data: dict) -> str:
+            """Convert roadmap JSON to readable markdown."""
+            if not roadmap_data or not isinstance(roadmap_data, dict):
+                return "No roadmap data available."
+            
+            seven_day = roadmap_data.get('seven_day_sprint', {})
+            thirty_day = roadmap_data.get('thirty_day_sprint', {})
+            
+            md = "## Actionable Roadmap\n\n"
+            
+            if seven_day and isinstance(seven_day, dict):
+                md += f"""### 🏃 7-Day Sprint
+**Objective:** {seven_day.get('objective', 'N/A')}
+
+**Hypothesis to Test:** {seven_day.get('hypothesis_to_test', 'N/A')}
+
+**Success Criteria:** {seven_day.get('success_criteria', 'N/A')}
+
+"""
+            
+            if thirty_day and isinstance(thirty_day, dict):
+                md += f"""### 📅 30-Day Sprint
+**Objective:** {thirty_day.get('objective', 'N/A')}
+
+**Moat Building Focus:** {thirty_day.get('moat_building_focus', 'N/A')}
+
+"""
+            
+            return md
+        
+        # Define sections to save with properly formatted markdown
         sections_to_save = [
             ('executive_synthesis', 'Executive Synthesis', analysis_result.get('executive_synthesis', '')),
-            ('scoring_demand', 'Market Demand Score', json.dumps(scores.get('demand', {}), indent=2)),
-            ('scoring_competition', 'Competition Score', json.dumps(scores.get('competition', {}), indent=2)),
-            ('scoring_differentiation', 'Differentiation Score', json.dumps(scores.get('differentiation', {}), indent=2)),
-            ('scoring_economics', 'Economics Score', json.dumps(scores.get('economics', {}), indent=2)),
-            ('scoring_feasibility', 'Feasibility Score', json.dumps(scores.get('feasibility', {}), indent=2)),
-            ('risk_synthesis', 'Risk Synthesis (FMEA)', json.dumps(risks, indent=2)),
-            ('verdict_decision', 'Verdict Decision', json.dumps(verdict, indent=2)),
-            ('roadmap', 'Actionable Roadmap', json.dumps(roadmap, indent=2)),
+            ('scoring_demand', 'Scoring Demand', format_score_to_markdown('demand', scores.get('demand', {}))),
+            ('scoring_competition', 'Scoring Competition', format_score_to_markdown('competition', scores.get('competition', {}))),
+            ('scoring_differentiation', 'Scoring Differentiation', format_score_to_markdown('differentiation', scores.get('differentiation', {}))),
+            ('scoring_economics', 'Scoring Economics', format_score_to_markdown('economics', scores.get('economics', {}))),
+            ('scoring_feasibility', 'Scoring Feasibility', format_score_to_markdown('feasibility', scores.get('feasibility', {}))),
+            ('risk_synthesis', 'Risk Synthesis', format_risks_to_markdown(risks)),
+            ('verdict_decision', 'Verdict Decision', format_verdict_to_markdown(verdict)),
+            ('roadmap', 'Actionable Roadmap', format_roadmap_to_markdown(roadmap)),
         ]
         
         # Save each section to DB

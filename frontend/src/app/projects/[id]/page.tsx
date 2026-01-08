@@ -50,17 +50,27 @@ interface TimeEstimate {
     }>;
 }
 
+// Report version for dropdown
+interface ReportVersionInfo {
+    id: string;
+    version_number: number;
+    generated_at: string;
+    changes_summary: string;
+}
+
 interface Report {
     id: string;
     report_type: string;
     status: string;
     progress: number;
     current_step: string;
+    current_version: number;
     is_outdated: boolean;
     completed_at: string | null;
     html_content: string;
     progress_steps?: ProgressStep[];
     time_estimate?: TimeEstimate;
+    versions?: ReportVersionInfo[];
 }
 
 interface ProjectInputs {
@@ -108,6 +118,7 @@ const REPORT_TYPES = [
     { type: "crunchbase", label: "Crunchbase Analysis", icon: "🔍", description: "Competitor intelligence and funding data" },
     { type: "tracxn", label: "Tracxn Insights", icon: "📊", description: "Startup landscape and market trends" },
     { type: "social", label: "Social Analysis", icon: "📱", description: "Brand mentions and social sentiment" },
+    { type: "verdict", label: "Verdict Analysis", icon: "⚖️", description: "GO/ITERATE/KILL viability assessment" },
     { type: "pitch_deck", label: "Pitch Deck", icon: "🎯", description: "Auto-generated investor pitch deck" },
 ];
 
@@ -171,6 +182,21 @@ export default function ProjectPage() {
 
     // Progress steps collapsed state (per report)
     const [collapsedSteps, setCollapsedSteps] = useState<Record<string, boolean>>({});
+
+    // Verdict confirmation modal state
+    const [verdictConfirmModal, setVerdictConfirmModal] = useState<{
+        show: boolean;
+        message: string;
+        completedReports: string[];
+        missingReports: string[];
+        reportId: string;
+    } | null>(null);
+
+    // Version dropdown state (which report's dropdown is open)
+    const [versionDropdownOpen, setVersionDropdownOpen] = useState<string | null>(null);
+
+    // Track which reports are currently being restarted (prevent double-clicks)
+    const [restartingReports, setRestartingReports] = useState<Set<string>>(new Set());
 
     const wsRef = useRef<WebSocket | null>(null);
     const wsReconnectAttempts = useRef<number>(0);
@@ -538,13 +564,30 @@ export default function ProjectPage() {
         try {
             const res = await fetch(`${API_URL}/api/reports/project/${projectId}/${report.id}/start/`, {
                 method: "POST",
-                headers: { Authorization: `Bearer ${token}` },
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type": "application/json"
+                },
             });
 
+            const responseData = await res.json().catch(() => ({}));
+
+            // Handle verdict warning response (partial data confirmation needed)
+            if (res.ok && responseData.warning && reportType === "verdict") {
+                // Show styled confirmation modal instead of window.confirm
+                setVerdictConfirmModal({
+                    show: true,
+                    message: responseData.message,
+                    completedReports: responseData.completed_reports || [],
+                    missingReports: responseData.missing_reports || [],
+                    reportId: report.id
+                });
+                return;
+            }
+
             if (!res.ok) {
-                const errorData = await res.json().catch(() => ({}));
-                console.error("Failed to start report:", res.status, errorData);
-                setInputValidationMessage(errorData.error || "Failed to start report. Please try again.");
+                console.error("Failed to start report:", res.status, responseData);
+                setInputValidationMessage(responseData.error || "Failed to start report. Please try again.");
                 setTimeout(() => setInputValidationMessage(""), 5000);
                 return;
             }
@@ -560,6 +603,106 @@ export default function ProjectPage() {
             console.error("Failed to start report:", error);
             setInputValidationMessage("Network error. Please check your connection and try again.");
             setTimeout(() => setInputValidationMessage(""), 5000);
+        }
+    };
+
+    // Handle verdict partial data confirmation
+    const confirmVerdictPartialData = async () => {
+        if (!verdictConfirmModal) return;
+
+        try {
+            const confirmRes = await fetch(`${API_URL}/api/reports/project/${projectId}/${verdictConfirmModal.reportId}/start/`, {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ confirm_partial: true })
+            });
+
+            if (!confirmRes.ok) {
+                const errorData = await confirmRes.json().catch(() => ({}));
+                setInputValidationMessage(errorData.error || "Failed to start report.");
+                setTimeout(() => setInputValidationMessage(""), 5000);
+                setVerdictConfirmModal(null);
+                return;
+            }
+
+            setReports((prev) =>
+                prev.map((r) =>
+                    r.report_type === "verdict"
+                        ? { ...r, status: "running", progress: 0, current_step: "Starting..." }
+                        : r
+                )
+            );
+            setVerdictConfirmModal(null);
+        } catch (error) {
+            console.error("Failed to start verdict report:", error);
+            setInputValidationMessage("Network error. Please try again.");
+            setTimeout(() => setInputValidationMessage(""), 5000);
+            setVerdictConfirmModal(null);
+        }
+    };
+
+    // Restart a completed/failed report to generate a new version
+    const restartReport = async (reportId: string, reportType: string) => {
+        // Prevent double-clicks
+        if (restartingReports.has(reportId)) {
+            return;
+        }
+
+        // Mark as restarting
+        setRestartingReports(prev => new Set(prev).add(reportId));
+
+        try {
+            const res = await fetch(`${API_URL}/api/reports/project/${projectId}/${reportId}/restart/`, {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type": "application/json"
+                },
+            });
+
+            const responseData = await res.json().catch(() => ({}));
+
+            if (!res.ok) {
+                console.error("Failed to restart report:", res.status, responseData);
+                setInputValidationMessage(responseData.error || "Failed to restart report.");
+                setTimeout(() => setInputValidationMessage(""), 5000);
+                // Remove from restarting set on error
+                setRestartingReports(prev => {
+                    const next = new Set(prev);
+                    next.delete(reportId);
+                    return next;
+                });
+                return;
+            }
+
+            // Update UI to show running state and clear progress steps
+            setReports((prev) =>
+                prev.map((r) =>
+                    r.id === reportId
+                        ? { ...r, status: "running", progress: 0, current_step: "Starting...", progress_steps: [] }
+                        : r
+                )
+            );
+
+            // Remove from restarting set (status is now 'running' which disables button anyway)
+            setRestartingReports(prev => {
+                const next = new Set(prev);
+                next.delete(reportId);
+                return next;
+            });
+        } catch (error) {
+            console.error("Failed to restart report:", error);
+            setInputValidationMessage("Network error. Please try again.");
+            setTimeout(() => setInputValidationMessage(""), 5000);
+            // Remove from restarting set on error
+            setRestartingReports(prev => {
+                const next = new Set(prev);
+                next.delete(reportId);
+                return next;
+            });
         }
     };
 
@@ -1361,18 +1504,141 @@ export default function ProjectPage() {
                                                             </>
                                                         ) : status === "completed" ? (
                                                             <>
-                                                                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+                                                                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px", flexWrap: "wrap" }}>
                                                                     <span style={{ fontSize: "12px", color: "var(--color-success)" }}>✓ Completed</span>
+
+                                                                    {/* View Report Button */}
                                                                     {report?.html_content && (
                                                                         <button
                                                                             onClick={(e) => {
                                                                                 e.stopPropagation();
-                                                                                // Navigate to report page
                                                                                 router.push(`/projects/${projectId}/reports/${report.id}`);
                                                                             }}
                                                                             style={{ padding: "4px 12px", background: "var(--color-primary)", border: "none", borderRadius: "var(--radius-sm)", color: "white", cursor: "pointer", fontSize: "11px", fontWeight: 500 }}
                                                                         >
                                                                             View Report
+                                                                        </button>
+                                                                    )}
+
+                                                                    {/* Version Dropdown - only show if there are previous versions */}
+                                                                    {report?.versions && report.versions.length > 1 && (
+                                                                        <div style={{ position: "relative" }}>
+                                                                            <button
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    setVersionDropdownOpen(versionDropdownOpen === report.id ? null : report.id);
+                                                                                }}
+                                                                                style={{
+                                                                                    padding: "4px 8px",
+                                                                                    background: "var(--color-surface-muted)",
+                                                                                    border: "1px solid var(--color-border)",
+                                                                                    borderRadius: "var(--radius-sm)",
+                                                                                    cursor: "pointer",
+                                                                                    display: "flex",
+                                                                                    alignItems: "center",
+                                                                                    gap: "4px",
+                                                                                    fontSize: "11px",
+                                                                                    color: "var(--color-text)"
+                                                                                }}
+                                                                                title="View previous versions"
+                                                                            >
+                                                                                <span>v{report.current_version}</span>
+                                                                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                                                    <path d="M6 9l6 6 6-6" />
+                                                                                </svg>
+                                                                            </button>
+
+                                                                            {/* Dropdown Menu */}
+                                                                            {versionDropdownOpen === report.id && (
+                                                                                <div
+                                                                                    style={{
+                                                                                        position: "absolute",
+                                                                                        top: "100%",
+                                                                                        left: 0,
+                                                                                        marginTop: "4px",
+                                                                                        background: "var(--color-surface-elevated)",
+                                                                                        border: "1px solid var(--color-border)",
+                                                                                        borderRadius: "var(--radius-sm)",
+                                                                                        boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+                                                                                        zIndex: 100,
+                                                                                        minWidth: "140px",
+                                                                                        overflow: "hidden"
+                                                                                    }}
+                                                                                    onClick={(e) => e.stopPropagation()}
+                                                                                >
+                                                                                    <div style={{ padding: "6px 10px", fontSize: "10px", fontWeight: 600, color: "var(--color-text-muted)", borderBottom: "1px solid var(--color-border)", textTransform: "uppercase" }}>
+                                                                                        Previous Versions
+                                                                                    </div>
+                                                                                    {report.versions
+                                                                                        .filter(v => v.version_number < report.current_version)
+                                                                                        .sort((a, b) => b.version_number - a.version_number)
+                                                                                        .map((version) => (
+                                                                                            <button
+                                                                                                key={version.id}
+                                                                                                onClick={() => {
+                                                                                                    setVersionDropdownOpen(null);
+                                                                                                    router.push(`/projects/${projectId}/reports/${report.id}?version=${version.version_number}`);
+                                                                                                }}
+                                                                                                style={{
+                                                                                                    display: "block",
+                                                                                                    width: "100%",
+                                                                                                    padding: "8px 10px",
+                                                                                                    background: "transparent",
+                                                                                                    border: "none",
+                                                                                                    textAlign: "left",
+                                                                                                    cursor: "pointer",
+                                                                                                    fontSize: "11px",
+                                                                                                    color: "var(--color-text)",
+                                                                                                    borderBottom: "1px solid var(--color-border)"
+                                                                                                }}
+                                                                                                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--color-surface-muted)")}
+                                                                                                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                                                                                            >
+                                                                                                <div style={{ fontWeight: 500 }}>Report v{version.version_number}</div>
+                                                                                                <div style={{ fontSize: "9px", color: "var(--color-text-muted)", marginTop: "2px" }}>
+                                                                                                    {new Date(version.generated_at).toLocaleDateString()}
+                                                                                                </div>
+                                                                                            </button>
+                                                                                        ))}
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    )}
+
+                                                                    {/* Restart Button */}
+                                                                    {report && (
+                                                                        <button
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation();
+                                                                                restartReport(report.id, report.report_type);
+                                                                            }}
+                                                                            disabled={restartingReports.has(report.id)}
+                                                                            style={{
+                                                                                padding: "4px 10px",
+                                                                                background: restartingReports.has(report.id) ? "var(--color-surface-hover)" : "transparent",
+                                                                                border: "1px solid var(--color-border)",
+                                                                                borderRadius: "var(--radius-sm)",
+                                                                                color: restartingReports.has(report.id) ? "var(--color-text-muted)" : "var(--color-text-secondary)",
+                                                                                cursor: restartingReports.has(report.id) ? "not-allowed" : "pointer",
+                                                                                fontSize: "11px",
+                                                                                fontWeight: 500,
+                                                                                display: "flex",
+                                                                                alignItems: "center",
+                                                                                gap: "4px",
+                                                                                opacity: restartingReports.has(report.id) ? 0.6 : 1
+                                                                            }}
+                                                                            title={restartingReports.has(report.id) ? "Restarting..." : "Generate a new version of this report"}
+                                                                        >
+                                                                            {restartingReports.has(report.id) ? (
+                                                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ animation: "spin 1s linear infinite" }}>
+                                                                                    <circle cx="12" cy="12" r="10" strokeDasharray="30 70" />
+                                                                                </svg>
+                                                                            ) : (
+                                                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                                                    <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                                                                                </svg>
+                                                                            )}
+                                                                            {restartingReports.has(report.id) ? "Restarting..." : "Restart"}
                                                                         </button>
                                                                     )}
                                                                 </div>
@@ -1884,6 +2150,146 @@ export default function ProjectPage() {
                     </aside>
                 </div >
             </div >
+
+            {/* Verdict Partial Data Confirmation Modal */}
+            {verdictConfirmModal && verdictConfirmModal.show && (
+                <div style={{
+                    position: "fixed",
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    background: "rgba(0, 0, 0, 0.7)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    zIndex: 2000,
+                    backdropFilter: "blur(4px)"
+                }}>
+                    <div style={{
+                        background: "var(--color-surface-elevated)",
+                        borderRadius: "16px",
+                        border: "1px solid var(--color-border)",
+                        maxWidth: "500px",
+                        width: "90%",
+                        padding: "24px",
+                        boxShadow: "0 20px 60px rgba(0, 0, 0, 0.4)"
+                    }}>
+                        {/* Header */}
+                        <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "16px" }}>
+                            <div style={{
+                                width: "40px",
+                                height: "40px",
+                                background: "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)",
+                                borderRadius: "12px",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                fontSize: "20px"
+                            }}>
+                                ⚠️
+                            </div>
+                            <div>
+                                <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 600, color: "var(--color-heading)" }}>
+                                    Partial Data Warning
+                                </h3>
+                                <p style={{ margin: 0, fontSize: "12px", color: "var(--color-text-muted)" }}>
+                                    Verdict Analysis
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Message */}
+                        <p style={{
+                            fontSize: "14px",
+                            color: "var(--color-text)",
+                            lineHeight: "1.6",
+                            marginBottom: "20px"
+                        }}>
+                            {verdictConfirmModal.message}
+                        </p>
+
+                        {/* Reports Status */}
+                        <div style={{
+                            display: "flex",
+                            gap: "12px",
+                            marginBottom: "24px",
+                            flexWrap: "wrap"
+                        }}>
+                            {verdictConfirmModal.completedReports.length > 0 && (
+                                <div style={{
+                                    flex: 1,
+                                    minWidth: "140px",
+                                    padding: "12px",
+                                    background: "rgba(16, 185, 129, 0.1)",
+                                    border: "1px solid rgba(16, 185, 129, 0.3)",
+                                    borderRadius: "8px"
+                                }}>
+                                    <div style={{ fontSize: "11px", color: "#10b981", fontWeight: 600, marginBottom: "6px" }}>
+                                        ✓ AVAILABLE
+                                    </div>
+                                    {verdictConfirmModal.completedReports.map((r) => (
+                                        <div key={r} style={{ fontSize: "13px", color: "var(--color-text)" }}>{r}</div>
+                                    ))}
+                                </div>
+                            )}
+                            {verdictConfirmModal.missingReports.length > 0 && (
+                                <div style={{
+                                    flex: 1,
+                                    minWidth: "140px",
+                                    padding: "12px",
+                                    background: "rgba(239, 68, 68, 0.1)",
+                                    border: "1px solid rgba(239, 68, 68, 0.3)",
+                                    borderRadius: "8px"
+                                }}>
+                                    <div style={{ fontSize: "11px", color: "#ef4444", fontWeight: 600, marginBottom: "6px" }}>
+                                        ✗ MISSING
+                                    </div>
+                                    {verdictConfirmModal.missingReports.map((r) => (
+                                        <div key={r} style={{ fontSize: "13px", color: "var(--color-text)" }}>{r}</div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Action Buttons */}
+                        <div style={{ display: "flex", gap: "12px", justifyContent: "flex-end" }}>
+                            <button
+                                onClick={() => setVerdictConfirmModal(null)}
+                                style={{
+                                    padding: "10px 20px",
+                                    background: "var(--color-surface-muted)",
+                                    border: "1px solid var(--color-border)",
+                                    borderRadius: "8px",
+                                    color: "var(--color-text)",
+                                    fontSize: "14px",
+                                    fontWeight: 500,
+                                    cursor: "pointer",
+                                    transition: "all 0.2s ease"
+                                }}
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={confirmVerdictPartialData}
+                                style={{
+                                    padding: "10px 20px",
+                                    background: "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)",
+                                    border: "none",
+                                    borderRadius: "8px",
+                                    color: "#fff",
+                                    fontSize: "14px",
+                                    fontWeight: 600,
+                                    cursor: "pointer",
+                                    transition: "all 0.2s ease"
+                                }}
+                            >
+                                Proceed Anyway
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </>
     );
 }
